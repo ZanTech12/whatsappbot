@@ -8,23 +8,31 @@ import {
   getWhatsAppStatus,
   getCurrentQR,
   requestPairing,
-  sendWhatsAppOTP
+  sendWhatsAppOTP,
+  sendWhatsAppNotification
 } from "./bot.js";
 
 const app = express();
 
-app.use(express.json({ limit: "20kb" }));
+// Allow PDF receipts to be transferred as Base64.
+// The decoded PDF is limited separately below.
+app.use(express.json({ limit: "12mb" }));
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const BOT_API_SECRET = process.env.BOT_API_SECRET;
+
+const MAX_PDF_SIZE = 7 * 1024 * 1024;
 
 // ==========================================
 // ADMIN AUTHENTICATION
 // ==========================================
 
 function adminAuth(req, res, next) {
-  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  const token = req.headers.authorization?.replace(
+    /^Bearer\s+/i,
+    ""
+  );
 
   if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
     return res.status(401).json({
@@ -38,7 +46,7 @@ function adminAuth(req, res, next) {
 
 // ==========================================
 // INTERNAL BOT SERVICE AUTHENTICATION
-// Used by Vercel backend for OTP delivery
+// Used by the Vercel e-commerce backend
 // ==========================================
 
 function botServiceAuth(req, res, next) {
@@ -52,6 +60,17 @@ function botServiceAuth(req, res, next) {
   }
 
   next();
+}
+
+// ==========================================
+// PHONE VALIDATION
+// ==========================================
+
+function isValidPhone(phone) {
+  return (
+    typeof phone === "string" &&
+    /^\+?\d{10,15}$/.test(phone.trim())
+  );
 }
 
 // ==========================================
@@ -73,7 +92,6 @@ app.get("/health", (req, res) => {
 
 // ==========================================
 // INTERNAL WHATSAPP OTP ENDPOINT
-// Called by Vercel e-commerce backend
 // ==========================================
 
 app.post(
@@ -97,7 +115,7 @@ app.post(
         });
       }
 
-      if (typeof phone !== "string" || phone.length > 30) {
+      if (!isValidPhone(phone)) {
         return res.status(400).json({
           success: false,
           message: "Invalid phone number."
@@ -111,7 +129,11 @@ app.post(
         });
       }
 
-      await sendWhatsAppOTP(phone, otp, name || "Customer");
+      await sendWhatsAppOTP(
+        phone,
+        otp,
+        name || "Customer"
+      );
 
       return res.status(200).json({
         success: true,
@@ -127,6 +149,157 @@ app.post(
       return res.status(503).json({
         success: false,
         message: "WhatsApp OTP delivery failed."
+      });
+    }
+  }
+);
+
+// ==========================================
+// INTERNAL ORDER / PAYMENT NOTIFICATION
+// ==========================================
+//
+// Called by the Divine Solar Hub e-commerce
+// backend after an order or payment event.
+//
+// Expected JSON:
+//
+// {
+//   "phone": "2348012345678",
+//   "message": "Your order has been confirmed.",
+//   "pdfBase64": "optional-base64-pdf",
+//   "fileName": "Divine-Solar-Receipt.pdf"
+// }
+//
+// Authentication:
+// x-bot-secret: BOT_API_SECRET
+//
+// ==========================================
+
+app.post(
+  "/internal/send-notification",
+  botServiceAuth,
+  async (req, res) => {
+    try {
+      const {
+        phone,
+        message,
+        pdfBase64,
+        fileName
+      } = req.body || {};
+
+      // Validate customer phone.
+      if (!isValidPhone(phone)) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid customer phone number is required."
+        });
+      }
+
+      // Validate notification message.
+      if (
+        typeof message !== "string" ||
+        !message.trim() ||
+        message.length > 10000
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid notification message is required."
+        });
+      }
+
+      let pdfBuffer = null;
+
+      // ======================================
+      // OPTIONAL PDF RECEIPT VALIDATION
+      // ======================================
+
+      if (pdfBase64 !== undefined && pdfBase64 !== null) {
+        if (
+          typeof pdfBase64 !== "string" ||
+          !pdfBase64.trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid PDF receipt data."
+          });
+        }
+
+        // Reject excessively large Base64 payloads.
+        const estimatedSize =
+          Math.floor(pdfBase64.length * 0.75);
+
+        if (estimatedSize > MAX_PDF_SIZE) {
+          return res.status(413).json({
+            success: false,
+            message: "PDF receipt exceeds the 7MB limit."
+          });
+        }
+
+        // Decode Base64.
+        pdfBuffer = Buffer.from(pdfBase64, "base64");
+
+        // Validate actual decoded size.
+        if (
+          !pdfBuffer.length ||
+          pdfBuffer.length > MAX_PDF_SIZE
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid or oversized PDF receipt."
+          });
+        }
+
+        // A genuine PDF begins with %PDF.
+        if (
+          pdfBuffer.subarray(0, 5).toString() !== "%PDF-"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "The supplied document is not a valid PDF."
+          });
+        }
+      }
+
+      // ======================================
+      // SAFE FILE NAME
+      // ======================================
+
+      const safeFileName =
+        typeof fileName === "string" &&
+        fileName.trim()
+          ? fileName
+              .replace(/[^a-zA-Z0-9._-]/g, "_")
+              .slice(0, 100)
+          : "Divine-Solar-Hub-Receipt.pdf";
+
+      // ======================================
+      // SEND WHATSAPP NOTIFICATION
+      // ======================================
+
+      await sendWhatsAppNotification(
+        phone,
+        message.trim(),
+        pdfBuffer,
+        safeFileName
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: pdfBuffer
+          ? "WhatsApp notification and PDF receipt sent successfully."
+          : "WhatsApp notification sent successfully.",
+        receiptSent: Boolean(pdfBuffer)
+      });
+
+    } catch (error) {
+      console.error(
+        "WHATSAPP NOTIFICATION ERROR:",
+        error.message
+      );
+
+      return res.status(503).json({
+        success: false,
+        message: "WhatsApp notification delivery failed."
       });
     }
   }

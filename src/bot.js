@@ -173,6 +173,123 @@ export async function sendWhatsAppOTP(
 }
 
 // ==========================================
+// SEND ORDER / PAYMENT / TRACKING MESSAGE
+// AND OPTIONAL PDF RECEIPT
+// ==========================================
+
+export async function sendWhatsAppNotification(
+  phone,
+  message,
+  pdfBuffer = null,
+  fileName = "Divine-Solar-Hub-Receipt.pdf"
+) {
+  // Check WhatsApp connection.
+  if (!sock || connectionStatus !== "connected") {
+    throw new Error(
+      "WhatsApp service is not connected."
+    );
+  }
+
+  // Validate phone number.
+  const number = normalizePhone(phone);
+
+  if (
+    number.length < 10 ||
+    number.length > 15
+  ) {
+    throw new Error(
+      "Invalid WhatsApp recipient phone number."
+    );
+  }
+
+  // Validate message.
+  if (
+    typeof message !== "string" ||
+    !message.trim()
+  ) {
+    throw new Error(
+      "WhatsApp notification message is required."
+    );
+  }
+
+  if (message.length > 10000) {
+    throw new Error(
+      "WhatsApp notification message is too long."
+    );
+  }
+
+  const jid = `${number}@s.whatsapp.net`;
+
+  // Send the notification message.
+  await sock.sendMessage(jid, {
+    text: message.trim()
+  });
+
+  console.log(
+    "WhatsApp notification message sent."
+  );
+
+  // ========================================
+  // OPTIONAL PDF RECEIPT
+  // ========================================
+
+  if (pdfBuffer !== null && pdfBuffer !== undefined) {
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      throw new Error(
+        "PDF receipt must be supplied as a Buffer."
+      );
+    }
+
+    const MAX_PDF_SIZE = 7 * 1024 * 1024;
+
+    if (
+      !pdfBuffer.length ||
+      pdfBuffer.length > MAX_PDF_SIZE
+    ) {
+      throw new Error(
+        "PDF receipt is empty or exceeds the 7MB limit."
+      );
+    }
+
+    // Validate PDF signature.
+    if (
+      pdfBuffer.subarray(0, 5).toString() !== "%PDF-"
+    ) {
+      throw new Error(
+        "Invalid PDF receipt file."
+      );
+    }
+
+    // Sanitize document filename.
+    let safeFileName =
+      String(fileName || "Divine-Solar-Hub-Receipt.pdf")
+        .replace(/[^a-zA-Z0-9._-]/g, "_")
+        .slice(0, 100);
+
+    if (!safeFileName.toLowerCase().endsWith(".pdf")) {
+      safeFileName += ".pdf";
+    }
+
+    // Send PDF document.
+    await sock.sendMessage(jid, {
+      document: pdfBuffer,
+      mimetype: "application/pdf",
+      fileName: safeFileName,
+      caption: "Your Divine Solar Hub PDF receipt."
+    });
+
+    console.log(
+      "WhatsApp PDF receipt sent."
+    );
+  }
+
+  return {
+    success: true,
+    messageSent: true,
+    receiptSent: Boolean(pdfBuffer)
+  };
+}
+// ==========================================
 // PRODUCT HELPERS
 // ==========================================
 
