@@ -1,6 +1,5 @@
 
 import "dotenv/config";
-
 import express from "express";
 
 import {
@@ -14,15 +13,18 @@ import {
 
 const app = express();
 
-// Allow PDF receipts to be transferred as Base64.
-// The decoded PDF is limited separately below.
-app.use(express.json({ limit: "12mb" }));
+// ==========================================
+// CONFIGURATION
+// ==========================================
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const BOT_API_SECRET = process.env.BOT_API_SECRET;
 
 const MAX_PDF_SIZE = 7 * 1024 * 1024;
+const SERVER_STARTED_AT = new Date().toISOString();
+
+app.use(express.json({ limit: "12mb" }));
 
 // ==========================================
 // ADMIN AUTHENTICATION
@@ -46,7 +48,6 @@ function adminAuth(req, res, next) {
 
 // ==========================================
 // INTERNAL BOT SERVICE AUTHENTICATION
-// Used by the Vercel e-commerce backend
 // ==========================================
 
 function botServiceAuth(req, res, next) {
@@ -78,15 +79,30 @@ function isValidPhone(phone) {
 // ==========================================
 
 app.get("/", (req, res) => {
-  res.send("Divine Solar Hub WhatsApp Bot is running.");
+  res.status(200).send(
+    "Divine Solar Hub WhatsApp Bot is running."
+  );
 });
 
+// ==========================================
+// UPTIMEROBOT HEALTH CHECK
+// ==========================================
+
 app.get("/health", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
+    status: "online",
     service: "Divine Solar Hub WhatsApp Bot",
+
+    server: {
+      status: "running",
+      uptime: Math.floor(process.uptime()),
+      startedAt: SERVER_STARTED_AT
+    },
+
     whatsapp: getWhatsAppStatus().status,
-    time: new Date().toISOString()
+
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -157,23 +173,6 @@ app.post(
 // ==========================================
 // INTERNAL ORDER / PAYMENT NOTIFICATION
 // ==========================================
-//
-// Called by the Divine Solar Hub e-commerce
-// backend after an order or payment event.
-//
-// Expected JSON:
-//
-// {
-//   "phone": "2348012345678",
-//   "message": "Your order has been confirmed.",
-//   "pdfBase64": "optional-base64-pdf",
-//   "fileName": "Divine-Solar-Receipt.pdf"
-// }
-//
-// Authentication:
-// x-bot-secret: BOT_API_SECRET
-//
-// ==========================================
 
 app.post(
   "/internal/send-notification",
@@ -224,9 +223,10 @@ app.post(
           });
         }
 
-        // Reject excessively large Base64 payloads.
-        const estimatedSize =
-          Math.floor(pdfBase64.length * 0.75);
+        // Estimate decoded Base64 size.
+        const estimatedSize = Math.floor(
+          pdfBase64.length * 0.75
+        );
 
         if (estimatedSize > MAX_PDF_SIZE) {
           return res.status(413).json({
@@ -249,7 +249,7 @@ app.post(
           });
         }
 
-        // A genuine PDF begins with %PDF.
+        // Validate PDF signature.
         if (
           pdfBuffer.subarray(0, 5).toString() !== "%PDF-"
         ) {
@@ -265,8 +265,7 @@ app.post(
       // ======================================
 
       const safeFileName =
-        typeof fileName === "string" &&
-        fileName.trim()
+        typeof fileName === "string" && fileName.trim()
           ? fileName
               .replace(/[^a-zA-Z0-9._-]/g, "_")
               .slice(0, 100)
@@ -316,6 +315,7 @@ app.get("/admin", (req, res) => {
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Divine Solar Hub WhatsApp Admin</title>
+
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -323,6 +323,7 @@ app.get("/admin", (req, res) => {
       padding: 25px;
       margin: 0;
     }
+
     .container {
       max-width: 480px;
       margin: 30px auto;
@@ -331,6 +332,7 @@ app.get("/admin", (req, res) => {
       border-radius: 12px;
       box-shadow: 0 4px 20px #0001;
     }
+
     input, button {
       box-sizing: border-box;
       width: 100%;
@@ -340,27 +342,32 @@ app.get("/admin", (req, res) => {
       border: 1px solid #ccc;
       font-size: 15px;
     }
+
     button {
       background: #087b45;
       color: white;
       border: 0;
       cursor: pointer;
     }
+
     button.secondary {
       background: #185abd;
     }
+
     #qr {
       width: 260px;
       max-width: 100%;
       display: none;
       margin: 20px auto;
     }
+
     .status {
       padding: 12px;
       background: #f0f4f6;
       border-radius: 7px;
       margin: 15px 0;
     }
+
     .hint {
       color: #666;
       font-size: 13px;
@@ -368,19 +375,29 @@ app.get("/admin", (req, res) => {
     }
   </style>
 </head>
+
 <body>
+
   <div class="container">
+
     <h2>Divine Solar Hub</h2>
     <h3>WhatsApp Connection</h3>
 
     <label>Admin token</label>
-    <input id="token" type="password" placeholder="Enter your Render ADMIN_TOKEN">
+
+    <input
+      id="token"
+      type="password"
+      placeholder="Enter your Render ADMIN_TOKEN"
+    >
 
     <button class="secondary" onclick="checkStatus()">
       Check connection status
     </button>
 
-    <div id="status" class="status">Not checked yet.</div>
+    <div id="status" class="status">
+      Not checked yet.
+    </div>
 
     <hr>
 
@@ -419,6 +436,7 @@ app.get("/admin", (req, res) => {
       Open WhatsApp Business → Linked Devices →
       Link a Device and scan the QR code.
     </p>
+
   </div>
 
 <script>
@@ -455,9 +473,13 @@ app.get("/admin", (req, res) => {
 
       document.getElementById("status").innerText =
         "WhatsApp status: " + data.status +
-        (data.pairingCode ? "\\nPairing code: " + data.pairingCode : "");
+        (data.pairingCode
+          ? "\\nPairing code: " + data.pairingCode
+          : "");
+
     } catch (error) {
-      document.getElementById("status").innerText = error.message;
+      document.getElementById("status").innerText =
+        error.message;
     }
   }
 
@@ -470,13 +492,16 @@ app.get("/admin", (req, res) => {
     try {
       const data = await api("/admin/pair", {
         method: "POST",
-        body: JSON.stringify({ phoneNumber: phone })
+        body: JSON.stringify({
+          phoneNumber: phone
+        })
       });
 
       result.innerText = data.message;
 
       setTimeout(checkStatus, 3000);
       setTimeout(checkStatus, 8000);
+
     } catch (error) {
       result.innerText = error.message;
     }
@@ -490,20 +515,29 @@ app.get("/admin", (req, res) => {
 
       if (!data.qr) {
         img.style.display = "none";
-        throw new Error(data.message || "QR code is not ready.");
+
+        throw new Error(
+          data.message || "QR code is not ready."
+        );
       }
 
       img.src = data.qr;
       img.style.display = "block";
+
     } catch (error) {
-      document.getElementById("status").innerText = error.message;
+      document.getElementById("status").innerText =
+        error.message;
     }
   }
 
+  // Refresh WhatsApp connection status.
   setInterval(() => {
-    if (tokenInput.value.trim()) checkStatus();
+    if (tokenInput.value.trim()) {
+      checkStatus();
+    }
   }, 15000);
 </script>
+
 </body>
 </html>
   `);
@@ -546,7 +580,7 @@ app.get("/admin/qr", adminAuth, (req, res) => {
 
 app.post("/admin/pair", adminAuth, async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
+    const { phoneNumber } = req.body || {};
 
     if (!phoneNumber) {
       return res.status(400).json({
@@ -571,8 +605,33 @@ app.post("/admin/pair", adminAuth, async (req, res) => {
 // START SERVER AND WHATSAPP
 // ==========================================
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`WhatsApp bot listening on port ${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(
+    `Divine Solar Hub WhatsApp Bot listening on port ${PORT}`
+  );
+
+  console.log("Health check: /health");
 
   startWhatsApp();
 });
+
+// ==========================================
+// GRACEFUL SHUTDOWN
+// ==========================================
+
+function shutdown(signal) {
+  console.log(`${signal} received. Shutting down server...`);
+
+  server.close(() => {
+    console.log("Express server closed.");
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error("Forced shutdown.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
