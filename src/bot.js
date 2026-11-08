@@ -384,9 +384,29 @@ Return ONLY one category name.
 // ==========================================
 
 function isCatalogBrowseRequest(message) {
-  const text = String(message || "").toLowerCase().trim();
+  const text = String(message || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[?!.,]+/g, " ")
+    .replace(/\s+/g, " ");
 
-  return /\b(what products can i get|what products do i have|what products do you have|what products are available|what do you have in store|what can i get in store|show me all products|show all products|browse all products|browse products|view all products|list all products|all products|your products|your catalogue|your catalog|product catalogue|product catalog)\b/i.test(text);
+  const patterns = [
+    /\b(show|display|list|view|see|browse)\b.{0,50}\b(all|every)\b.{0,25}\bproducts?\b/,
+
+    /\b(all|every)\s+(the\s+)?products?\b/,
+
+    /\b(i want|i need|i would like|i'd like|let me)\b.{0,40}\b(see|view|browse|check)\b.{0,25}\bproducts?\b/,
+
+    /\b(what|which)\s+products?\b.{0,35}\b(have|available|sell|offer)\b/,
+
+    /\b(browse|view|see|show|list)\b.{0,25}\b(product\s+)?catalog(ue)?\b/,
+
+    /\b(your|the|all)\s+(product\s+)?catalog(ue)?\b/,
+
+    /\b(what products do you have|what do you have in store|what products are available|all products|browse all products|view all products|show all products|list all products)\b/
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
 }
 
 function isExplicitProductRequest(message) {
@@ -424,10 +444,6 @@ function shouldTryCatalogSearch(message) {
     return false;
   }
 
-  // A standalone phrase can be a product name,
-  // brand, SKU or category.
-  //
-  // Its actual existence is checked by MongoDB.
   const words = text.split(/\s+/).filter(Boolean);
 
   return (
@@ -450,10 +466,17 @@ function extractProductSearchTerm(message = "") {
 
   const prefixes = [
     /^(please\s+)?(can you\s+)?(could you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
+
     /^(please\s+)?(do you have|have you got|do you sell)\s+/i,
+
+    /^(please\s+)?(i want|i need|i would like|i'm looking for|i am looking for|looking for)\s+(to\s+)?(see|view|browse|check)\s+/i,
+
     /^(please\s+)?(i want|i need|i would like|i am looking for|i'm looking for|looking for)\s+/i,
+
     /^(please\s+)?(what is the price of|what's the price of|how much is|how much does)\s+/i,
+
     /^(please\s+)?(buy|purchase|order)\s+/i,
+
     /^(please\s+)?(price of|availability of)\s+/i
   ];
 
@@ -1860,36 +1883,39 @@ async function handleConversation(jid, text) {
   // DIRECT DATABASE PRODUCT ROUTING
   // ========================================
 
-  // 1. General request for the entire catalogue.
-  // This bypasses Groq completely.
+  // 1. Full catalogue requests always fetch all products.
 
   if (isCatalogBrowseRequest(text)) {
+    console.log("Catalogue browse request detected:", text);
+
     await showProducts(jid, "");
     return;
   }
 
-  // 2. Explicit product requests.
-  // These go directly to the ecommerce backend.
+  // 2. Explicit product requests search the database.
 
   if (isExplicitProductRequest(text)) {
     const searchTerm = extractProductSearchTerm(text);
+
+    console.log("Explicit product search detected:", {
+      message: text,
+      searchTerm
+    });
 
     await showProducts(jid, searchTerm);
     return;
   }
 
-  // 3. Short standalone product names, brands,
-  // SKUs and categories are checked against MongoDB.
-  //
-  // Examples:
-  // Solar Panels
-  // Lithium Battery
-  // 5kVA Inverter
-  // A product brand
-  // An actual SKU
+  // 3. Standalone product names, brands, SKUs and
+  // categories are checked against MongoDB.
 
   if (shouldTryCatalogSearch(text)) {
     const searchTerm = extractProductSearchTerm(text);
+
+    console.log("Standalone product search detected:", {
+      message: text,
+      searchTerm
+    });
 
     await showProducts(jid, searchTerm);
     return;
@@ -1900,6 +1926,8 @@ async function handleConversation(jid, text) {
   // ========================================
 
   const intent = await detectMessageIntent(text);
+
+  console.log("Detected customer intent:", intent);
 
   // ========================================
   // GREETING / ACKNOWLEDGEMENT

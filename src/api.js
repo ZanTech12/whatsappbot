@@ -1,3 +1,6 @@
+
+"use strict";
+
 // ==========================================
 // DIVINE SOLAR HUB
 // WHATSAPP BOT API CONNECTION
@@ -23,7 +26,6 @@ async function request(path, options = {}) {
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...options,
-
       headers: {
         "Content-Type": "application/json",
         "x-bot-secret": BOT_SECRET,
@@ -60,14 +62,6 @@ async function request(path, options = {}) {
 
 // ==========================================
 // 1. SEARCH / BROWSE PRODUCTS
-//
-// GET /api/whatsapp/products
-//
-// Supports:
-// search
-// page
-// limit
-// category
 // ==========================================
 
 export async function searchProducts(
@@ -89,15 +83,30 @@ export async function searchProducts(
     params.set("category", String(category).trim());
   }
 
-  return request(
-    `/api/whatsapp/products?${params.toString()}`
-  );
+  const endpoint =
+    `/api/whatsapp/products?${params.toString()}`;
+
+  console.log("WhatsApp product API request:", {
+    search,
+    page,
+    limit,
+    category,
+    endpoint
+  });
+
+  const data = await request(endpoint);
+
+  console.log("WhatsApp product API response:", {
+    success: data.success,
+    total: data.total,
+    returned: data.products?.length
+  });
+
+  return data;
 }
 
 // ==========================================
-// 2. GET ALL PRODUCT CATEGORIES
-//
-// GET /api/whatsapp/categories
+// 2. GET PRODUCT CATEGORIES
 // ==========================================
 
 export async function getCategories() {
@@ -106,8 +115,6 @@ export async function getCategories() {
 
 // ==========================================
 // 3. GET SINGLE PRODUCT DETAILS
-//
-// GET /api/whatsapp/products/:id
 // ==========================================
 
 export async function getProductDetails(productId) {
@@ -122,8 +129,6 @@ export async function getProductDetails(productId) {
 
 // ==========================================
 // 4. CREATE GUEST ORDER
-//
-// POST /api/whatsapp/orders
 // ==========================================
 
 export async function createGuestOrder(orderData) {
@@ -139,8 +144,6 @@ export async function createGuestOrder(orderData) {
 
 // ==========================================
 // 5. TRACK ORDER
-//
-// GET /api/whatsapp/orders/:orderNumber
 // ==========================================
 
 export async function getOrderStatus(
