@@ -27,9 +27,32 @@ async function request(path, options = {}) {
   return data;
 }
 
-export async function searchProducts(search) {
+export async function searchProducts(
+  search = "",
+  page = 1,
+  limit = 8,
+  category = ""
+) {
+  const params = new URLSearchParams();
+
+  params.set("page", String(page));
+  params.set("limit", String(limit));
+
+  if (search) params.set("search", search);
+  if (category) params.set("category", category);
+
   return request(
-    `/api/whatsapp/products?search=${encodeURIComponent(search)}`
+    `/api/whatsapp/products?${params.toString()}`
+  );
+}
+
+export async function getCategories() {
+  return request("/api/whatsapp/categories");
+}
+
+export async function getProductDetails(productId) {
+  return request(
+    `/api/whatsapp/products/${encodeURIComponent(productId)}`
   );
 }
 

@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 
 import makeWASocket, {
@@ -14,6 +15,7 @@ import path from "path";
 
 import {
   searchProducts,
+  getCategories,
   createGuestOrder,
   getOrderStatus
 } from "./api.js";
@@ -45,6 +47,8 @@ const TYPING_CHARS_PER_SECOND = 40;
 
 const DEDUPE_TTL_MS = 10 * 60 * 1000;
 const MAX_DEDUPE_ENTRIES = 5000;
+
+const PRODUCTS_PER_PAGE = 8;
 
 // ==========================================
 // GROQ AI CONFIGURATION
@@ -732,20 +736,8 @@ export async function sendWhatsAppNotification(
 }
 
 // ==========================================
-// PRODUCT HELPERS
+// PRODUCT RESPONSE HELPERS
 // ==========================================
-
-// Your Vercel endpoint returns:
-// {
-//   success: true,
-//   total: 10,
-//   page: 1,
-//   pages: 1,
-//   products: [...]
-// }
-//
-// Only accept this exact response structure.
-// Do not interpret unrelated arrays as products.
 
 function getProducts(data) {
   if (
@@ -768,6 +760,44 @@ function getProducts(data) {
     product._id &&
     product.name
   );
+}
+
+function getCategoriesList(data) {
+  const raw =
+    Array.isArray(data)
+      ? data
+      : data?.categories ??
+        data?.data?.categories ??
+        data?.data ??
+        [];
+
+  if (!Array.isArray(raw)) {
+    console.error(
+      "Invalid categories API response:",
+      JSON.stringify(data).slice(0, 2000)
+    );
+
+    return [];
+  }
+
+  const names = raw
+    .map(item => {
+      if (typeof item === "string") return item.trim();
+
+      if (item && typeof item === "object") {
+        return String(
+          item.name ||
+          item.category ||
+          item.title ||
+          ""
+        ).trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+
+  return [...new Set(names)];
 }
 
 function productPrice(product) {
@@ -828,10 +858,10 @@ function isProductSearchMessage(message) {
   if (!text) return false;
 
   const technicalQuestion =
-    /\b(how does|how do|how can|how to|what is|what are|why does|why do|explain|calculate|calculate for me|difference between|work|works|working|function|functions|operate|operates|operating|install|installation|size|sizing)\b/i;
+    /\b(how does|how do|how can|how to|what is|what are|why does|why do|explain|calculate|difference between|work|works|working|function|functions|operate|operates|operating|install|installation|sizing)\b/i;
 
   const purchaseIntent =
-    /\b(buy|purchase|order|book|checkout|i want|i need|looking for|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|list products|browse products)\b/i;
+    /\b(buy|purchase|order|checkout|i want|i need|looking for|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|list products|browse products)\b/i;
 
   const productTerms =
     /\b(inverter|inverters|battery|batteries|lithium|tubular|solar panel|solar panels|panel|panels|charge controller|controller|controllers|solar light|solar lights|cable|cables|wire|wires|breaker|breakers|generator|generators|ups|kva|kw|watt|watts|product|products)\b/i;
@@ -839,7 +869,6 @@ function isProductSearchMessage(message) {
   const hasProduct = productTerms.test(text);
   const hasPurchaseIntent = purchaseIntent.test(text);
 
-  // Technical questions should normally be handled by Groq.
   if (
     technicalQuestion.test(text) &&
     !hasPurchaseIntent
@@ -851,150 +880,43 @@ function isProductSearchMessage(message) {
 }
 
 // ==========================================
-// PAIRING CODE
+// BROWSE ALL PRODUCTS / SEARCH PRODUCTS
 // ==========================================
 
-async function issuePairingCode() {
-  if (
-    !sock ||
-    !authState ||
-    !pendingPairingNumber ||
-    pairingRequested ||
-    connectionStatus === "connected"
-  ) {
-    return;
-  }
-
-  if (authState.creds.registered) {
-    console.error(
-      "Cannot request a pairing code: an existing session is registered."
-    );
-
-    connectionStatus = "logged_out";
-    return;
-  }
-
-  if (!qrEventReady) {
-    console.log("Waiting for WhatsApp pairing event.");
-    return;
-  }
-
-  pairingRequested = true;
-
-  try {
-    const number = pendingPairingNumber;
-
-    console.log("Requesting WhatsApp pairing code.");
-
-    await sleep(1500);
-
-    if (!sock || !authState || authState.creds.registered) {
-      throw new Error(
-        "WhatsApp socket is not ready for a new pairing request."
-      );
-    }
-
-    const code = await sock.requestPairingCode(number);
-
-    pairingCode = code;
-    currentQR = null;
-
-    connectionStatus = "pairing_code_ready";
-
-    console.log("WhatsApp pairing code generated successfully.");
-
-  } catch (error) {
-    pairingRequested = false;
-    pairingCode = null;
-
-    console.error(
-      "Pairing code request failed:",
-      error?.output?.payload || error.message || error
-    );
-  }
-}
-
-// ==========================================
-// REQUEST PAIRING
-// ==========================================
-
-export async function requestPairing(phoneNumber) {
-  const number = normalizePhone(phoneNumber);
-
-  if (number.length < 10 || number.length > 15) {
-    throw new Error(
-      "Enter a valid phone number with country code, digits only."
-    );
-  }
-
-  if (!sock) {
-    throw new Error(
-      "WhatsApp socket is not initialized. Restart the bot and try again."
-    );
-  }
-
-  if (connectionStatus === "connected") {
-    throw new Error("WhatsApp is already connected.");
-  }
-
-  if (authState?.creds?.registered) {
-    throw new Error(
-      "The saved WhatsApp session is already registered. Clear the active authentication folder before pairing again."
-    );
-  }
-
-  if (pendingPairingNumber && pairingRequested) {
-    throw new Error(
-      "A pairing-code request is already in progress. Please wait."
-    );
-  }
-
-  pendingPairingNumber = number;
-  pairingCode = null;
-  pairingRequested = false;
-  currentQR = null;
-
-  if (qrEventReady) {
-    await issuePairingCode();
-  }
-
-  return {
-    success: true,
-    message: qrEventReady
-      ? "Pairing code request submitted. Check the admin dashboard shortly."
-      : "Phone number saved. Waiting for WhatsApp connection event."
-  };
-}
-
-// ==========================================
-// PRODUCT SEARCH AND BROWSING
-// ==========================================
-
-async function showProducts(jid, search = "") {
+async function showProducts(
+  jid,
+  search = "",
+  page = 1,
+  category = ""
+) {
   const state = conversations.get(jid) || {};
 
-  // Clear previous search results immediately.
+  const searchTerm = String(search || "").trim();
+
   state.products = [];
   state.product = null;
-  state.stage = "search";
+  state.stage = "loading_products";
 
   conversations.set(jid, state);
 
-  const searchTerm = extractProductSearchTerm(search);
-
   try {
-    console.log(
-      "Searching Vercel product API:",
-      searchTerm || "ALL PRODUCTS"
+    console.log("Fetching products from backend:", {
+      search: searchTerm,
+      category,
+      page
+    });
+
+    const result = await searchProducts(
+      searchTerm,
+      page,
+      PRODUCTS_PER_PAGE,
+      category
     );
 
-    const result = await searchProducts(searchTerm);
-
-    // Strictly read the products returned by the backend.
     const products = getProducts(result);
 
     console.log(
-      "Products returned by API:",
+      "Products returned by backend:",
       products.map(product => ({
         id: String(product._id),
         name: product.name,
@@ -1006,33 +928,32 @@ async function showProducts(jid, search = "") {
 
     if (!products.length) {
       state.products = [];
-      state.stage = "search";
+      state.stage = "browse_empty";
 
       conversations.set(jid, state);
 
       await sendText(
         jid,
         searchTerm
-          ? `I couldn't find "${searchTerm}" in our product database. Please try another product name or category.`
-          : "There are currently no active products available in our store."
+          ? `I couldn't find "${searchTerm}" in our product database. Try another product name.`
+          : category
+            ? `There are currently no products listed under *${category}*.`
+            : "There are currently no active products available in our store."
       );
 
       return;
     }
 
-    // Backend already filters isActive:true.
-    // Keep only valid product records from its response.
     const available = products
       .filter(product =>
         product._id &&
         product.name &&
         Number.isFinite(Number(product.price))
-      )
-      .slice(0, 8);
+      );
 
     if (!available.length) {
       state.products = [];
-      state.stage = "search";
+      state.stage = "browse_empty";
 
       conversations.set(jid, state);
 
@@ -1044,14 +965,33 @@ async function showProducts(jid, search = "") {
       return;
     }
 
+    const currentPage = Number(result.page || page);
+    const totalPages = Number(result.pages || 1);
+    const total = Number(result.total || available.length);
+
     state.products = available;
     state.stage = "select_product";
+    state.currentPage = currentPage;
+    state.totalPages = totalPages;
+    state.totalProducts = total;
+    state.currentSearch = searchTerm;
+    state.selectedCategory = category;
 
     conversations.set(jid, state);
 
-    let response = searchTerm
-      ? `*${STORE_NAME} - PRODUCT SEARCH RESULTS*\n\n`
-      : `*${STORE_NAME} - AVAILABLE PRODUCTS*\n\n`;
+    let response = "";
+
+    if (category) {
+      response += `*${STORE_NAME} - ${category.toUpperCase()}*\n\n`;
+    } else if (searchTerm) {
+      response += `*${STORE_NAME} - SEARCH RESULTS*\n\n`;
+    } else {
+      response += `*${STORE_NAME} - ALL PRODUCTS*\n\n`;
+    }
+
+    response +=
+      `Showing page ${currentPage} of ${totalPages}\n` +
+      `Total products: ${total}\n\n`;
 
     available.forEach((product, index) => {
       const stock = Number(product.countInStock || 0);
@@ -1069,8 +1009,17 @@ async function showProducts(jid, search = "") {
     });
 
     response +=
-      "Reply with the product number to select it.\n\n" +
-      "Type MENU to return to the main menu.";
+      "Reply with the product number to select it.\n";
+
+    if (currentPage < totalPages) {
+      response += "Type *NEXT* to see more products.\n";
+    }
+
+    if (currentPage > 1) {
+      response += "Type *PREV* to go to the previous page.\n";
+    }
+
+    response += "\nType MENU to return to the main menu.";
 
     await sendText(jid, response);
 
@@ -1081,20 +1030,91 @@ async function showProducts(jid, search = "") {
     );
 
     state.products = [];
-    state.stage = "search";
+    state.stage = "browse_empty";
 
     conversations.set(jid, state);
 
     await sendText(
       jid,
-      "Sorry, I cannot check products at the moment. Please try again shortly."
+      "Sorry, I cannot retrieve products at the moment. Please try again shortly."
+    );
+  }
+}
+
+// ==========================================
+// BROWSE PRODUCT CATEGORIES
+// ==========================================
+
+async function showCategories(jid) {
+  const state = conversations.get(jid) || {};
+
+  state.stage = "loading_categories";
+  state.categories = [];
+
+  conversations.set(jid, state);
+
+  try {
+    console.log("Fetching product categories from backend.");
+
+    const result = await getCategories();
+
+    const categories = getCategoriesList(result);
+
+    console.log("Categories returned by backend:", categories);
+
+    if (!categories.length) {
+      state.stage = "browse_empty";
+      state.categories = [];
+
+      conversations.set(jid, state);
+
+      await sendText(
+        jid,
+        "There are currently no product categories available. You can choose Browse All Products from the main menu instead."
+      );
+
+      return;
+    }
+
+    state.categories = categories;
+    state.stage = "select_category";
+
+    conversations.set(jid, state);
+
+    let response =
+      `*${STORE_NAME} - PRODUCT CATEGORIES* ☀️\n\n` +
+      "Choose a category:\n\n";
+
+    categories.forEach((category, index) => {
+      response += `${index + 1}️⃣ ${category}\n`;
+    });
+
+    response +=
+      "\nReply with the category number to view its products.\n\n" +
+      "Type MENU to return to the main menu.";
+
+    await sendText(jid, response);
+
+  } catch (error) {
+    console.error(
+      "Category retrieval error:",
+      error.message
+    );
+
+    state.stage = "browse_empty";
+    state.categories = [];
+
+    conversations.set(jid, state);
+
+    await sendText(
+      jid,
+      "Sorry, I couldn't retrieve product categories right now. Please try again shortly."
     );
   }
 }
 
 // ==========================================
 // CREATE CUSTOMER ORDER
-// MATCHES YOUR VERCEL ORDER CONTROLLER
 // ==========================================
 
 async function createOrderFromConversation(jid, state) {
@@ -1144,16 +1164,18 @@ async function createOrderFromConversation(jid, state) {
 
     const result = await createGuestOrder(orderData);
 
-    if (!result || result.success !== true || !result.order) {
+    if (
+      !result ||
+      result.success !== true ||
+      !result.order
+    ) {
       throw new Error(
-        result?.message || "The order API did not confirm the order."
+        result?.message ||
+        "The order API did not confirm the order."
       );
     }
 
     const order = result.order;
-
-    // The current backend does not return a Monnify checkout URL.
-    // Therefore, do not invent one or claim payment has been completed.
     const totalAmount = Number(order.totalAmount || 0);
 
     await sendText(
@@ -1167,8 +1189,8 @@ async function createOrderFromConversation(jid, state) {
       `Order Status: ${order.status || "pending"}\n` +
       `Payment Status: ${order.paymentStatus || "pending"}\n\n` +
       `Your order is currently awaiting payment. ` +
-      `Our payment process must be completed before the order can be confirmed.\n\n` +
-      `Please keep your order number for reference.`
+      `Please keep your order number for reference.\n\n` +
+      `Thank you for choosing ${STORE_NAME}.`
     );
 
     conversations.delete(jid);
@@ -1199,10 +1221,11 @@ async function showMainMenu(jid) {
     `Welcome to *${STORE_NAME}*! ☀️\n\n` +
     `Thank you for contacting us.\n\n` +
     `How can we assist you today?\n\n` +
-    `1️⃣ Search products\n` +
-    `2️⃣ Browse products\n` +
-    `3️⃣ Track an order\n` +
-    `4️⃣ Customer support\n\n` +
+    `1️⃣ Search for a product\n` +
+    `2️⃣ Browse all products\n` +
+    `3️⃣ Browse by category\n` +
+    `4️⃣ Track an order\n` +
+    `5️⃣ Customer support\n\n` +
     `You can also ask me questions about solar energy, ` +
     `inverters, batteries and electrical products.\n\n` +
     `We're happy to help! 😊`
@@ -1249,24 +1272,84 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // ACTIVE TRANSACTION STAGES
+  // CATEGORY SELECTION
   // ========================================
 
-  if (state.stage === "search") {
-    if (normalized.length < 2) {
+  if (state.stage === "select_category") {
+    const index = Number(text) - 1;
+
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= state.categories.length
+    ) {
       await sendText(
         jid,
-        "Please enter a product name or category."
+        "Please enter a valid category number from the list, or type MENU."
       );
 
       return;
     }
 
-    await showProducts(jid, text);
+    const selectedCategory = state.categories[index];
+
+    await showProducts(
+      jid,
+      "",
+      1,
+      selectedCategory
+    );
+
     return;
   }
 
+  // ========================================
+  // PRODUCT PAGINATION AND SELECTION
+  // ========================================
+
   if (state.stage === "select_product") {
+    if (["next", "more", "next page"].includes(normalized)) {
+      if (state.currentPage >= state.totalPages) {
+        await sendText(
+          jid,
+          "You are already viewing the last product page."
+        );
+
+        return;
+      }
+
+      await showProducts(
+        jid,
+        state.currentSearch || "",
+        state.currentPage + 1,
+        state.selectedCategory || ""
+      );
+
+      return;
+    }
+
+    if (
+      ["prev", "previous", "previous page", "back"].includes(normalized)
+    ) {
+      if (state.currentPage <= 1) {
+        await sendText(
+          jid,
+          "You are already viewing the first product page."
+        );
+
+        return;
+      }
+
+      await showProducts(
+        jid,
+        state.currentSearch || "",
+        state.currentPage - 1,
+        state.selectedCategory || ""
+      );
+
+      return;
+    }
+
     const index = Number(text) - 1;
 
     if (
@@ -1276,7 +1359,7 @@ async function handleConversation(jid, text) {
     ) {
       await sendText(
         jid,
-        "Please enter a valid product number, or type MENU to return to the main menu."
+        "Please enter a valid product number. You can also type NEXT, PREV or MENU."
       );
 
       return;
@@ -1300,11 +1383,30 @@ async function handleConversation(jid, text) {
 
     await sendText(
       jid,
-      `You selected *${product.name}*.\n` +
-      `Price: ${formatNaira(productPrice(product))}\n\n` +
+      `You selected *${product.name}*.\n\n` +
+      `Price: ${formatNaira(productPrice(product))}\n` +
+      `Available stock: ${product.countInStock}\n\n` +
       `How many would you like?`
     );
 
+    return;
+  }
+
+  // ========================================
+  // ACTIVE TRANSACTION STAGES
+  // ========================================
+
+  if (state.stage === "search") {
+    if (normalized.length < 2) {
+      await sendText(
+        jid,
+        "Please enter a product name or category."
+      );
+
+      return;
+    }
+
+    await showProducts(jid, text);
     return;
   }
 
@@ -1432,7 +1534,7 @@ async function handleConversation(jid, text) {
 
     await sendText(
       jid,
-      "Please enter your delivery postcode or ZIP code.\n\nIf your area does not have a postcode, enter the appropriate postcode for your delivery location."
+      "Please enter your delivery postcode or ZIP code."
     );
 
     return;
@@ -1550,7 +1652,7 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // MENU SHORTCUTS BEFORE GROQ
+  // MENU SHORTCUTS
   // ========================================
 
   if (
@@ -1569,13 +1671,19 @@ async function handleConversation(jid, text) {
   if (
     ["2", "browse", "browse products", "view products", "all products"].includes(normalized)
   ) {
-    conversations.set(jid, {});
     await showProducts(jid, "");
     return;
   }
 
   if (
-    ["3", "track", "track order", "track an order"].includes(normalized)
+    ["3", "categories", "browse categories", "browse by category", "product categories"].includes(normalized)
+  ) {
+    await showCategories(jid);
+    return;
+  }
+
+  if (
+    ["4", "track", "track order", "track an order"].includes(normalized)
   ) {
     conversations.set(jid, { stage: "order_number" });
 
@@ -1584,7 +1692,7 @@ async function handleConversation(jid, text) {
   }
 
   if (
-    ["4", "support", "customer support", "contact support"].includes(normalized)
+    ["5", "support", "customer support", "contact support"].includes(normalized)
   ) {
     conversations.set(jid, { stage: "support" });
 
@@ -1653,12 +1761,127 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // General question or ongoing AI conversation.
   const aiResponse = await askCustomerAI(jid, text);
 
   conversations.set(jid, { stage: "ai_chat" });
 
   await sendText(jid, aiResponse);
+}
+
+// ==========================================
+// PAIRING CODE
+// ==========================================
+
+async function issuePairingCode() {
+  if (
+    !sock ||
+    !authState ||
+    !pendingPairingNumber ||
+    pairingRequested ||
+    connectionStatus === "connected"
+  ) {
+    return;
+  }
+
+  if (authState.creds.registered) {
+    console.error(
+      "Cannot request a pairing code: an existing session is registered."
+    );
+
+    connectionStatus = "logged_out";
+    return;
+  }
+
+  if (!qrEventReady) {
+    console.log("Waiting for WhatsApp pairing event.");
+    return;
+  }
+
+  pairingRequested = true;
+
+  try {
+    const number = pendingPairingNumber;
+
+    console.log("Requesting WhatsApp pairing code.");
+
+    await sleep(1500);
+
+    if (!sock || !authState || authState.creds.registered) {
+      throw new Error(
+        "WhatsApp socket is not ready for a new pairing request."
+      );
+    }
+
+    const code = await sock.requestPairingCode(number);
+
+    pairingCode = code;
+    currentQR = null;
+
+    connectionStatus = "pairing_code_ready";
+
+    console.log("WhatsApp pairing code generated successfully.");
+
+  } catch (error) {
+    pairingRequested = false;
+    pairingCode = null;
+
+    console.error(
+      "Pairing code request failed:",
+      error?.output?.payload || error.message || error
+    );
+  }
+}
+
+// ==========================================
+// REQUEST PAIRING
+// ==========================================
+
+export async function requestPairing(phoneNumber) {
+  const number = normalizePhone(phoneNumber);
+
+  if (number.length < 10 || number.length > 15) {
+    throw new Error(
+      "Enter a valid phone number with country code, digits only."
+    );
+  }
+
+  if (!sock) {
+    throw new Error(
+      "WhatsApp socket is not initialized. Restart the bot and try again."
+    );
+  }
+
+  if (connectionStatus === "connected") {
+    throw new Error("WhatsApp is already connected.");
+  }
+
+  if (authState?.creds?.registered) {
+    throw new Error(
+      "The saved WhatsApp session is already registered. Clear the active authentication folder before pairing again."
+    );
+  }
+
+  if (pendingPairingNumber && pairingRequested) {
+    throw new Error(
+      "A pairing-code request is already in progress. Please wait."
+    );
+  }
+
+  pendingPairingNumber = number;
+  pairingCode = null;
+  pairingRequested = false;
+  currentQR = null;
+
+  if (qrEventReady) {
+    await issuePairingCode();
+  }
+
+  return {
+    success: true,
+    message: qrEventReady
+      ? "Pairing code request submitted. Check the admin dashboard shortly."
+      : "Phone number saved. Waiting for WhatsApp connection event."
+  };
 }
 
 // ==========================================
