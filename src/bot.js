@@ -160,6 +160,15 @@ const CHAT_RESTART_INACTIVITY_MS =
 
 const MAX_CHAT_ACTIVITY_ENTRIES = 5000;
 
+// 10. AI open understanding ("outside the box")
+// Understands indirect, informal or mistyped
+// messages like "what can we buy fro you" and
+// routes them to the right store action
+// instead of a failed product search.
+
+const AI_OPEN_UNDERSTANDING_ENABLED =
+  process.env.AI_OPEN_UNDERSTANDING_ENABLED !== "false";
+
 // ==========================================
 // PERSISTENT CUSTOMER WELCOME REGISTRY
 // ==========================================
@@ -798,13 +807,13 @@ Official customer service contact details:
 Phone/WhatsApp: ${CUSTOMER_SERVICE_PHONE}
 
 WhatsApp chat:
- ${CUSTOMER_SERVICE_WHATSAPP_LINK}
+${CUSTOMER_SERVICE_WHATSAPP_LINK}
 
 Online store:
- ${ONLINE_STORE_URL}
+${ONLINE_STORE_URL}
 
 Website:
- ${OFFICIAL_WEBSITE_URL}
+${OFFICIAL_WEBSITE_URL}
 
 If a customer requests a human agent, customer care,
 a representative, or a member of the store team,
@@ -1014,7 +1023,7 @@ async function matchCategoryWithAI(text, categories) {
             content: `You match a customer's message to ONE product category from the official category list of ${STORE_NAME}.
 
 OFFICIAL CATEGORIES:
- ${categoryList}
+${categoryList}
 
 RULES:
 - If one category clearly matches what the customer is looking for, return ONLY that category name exactly as written in the list above.
@@ -1063,6 +1072,307 @@ RULES:
   }
 }
 
+// ==========================================
+// 10. AI OPEN UNDERSTANDING ("OUTSIDE THE BOX")
+// Interprets indirect, informal, mistyped or
+// Pidgin messages and routes them to the
+// right store action. On any failure it
+// returns false and the original flow runs
+// exactly as before.
+// ==========================================
+
+const OPEN_UNDERSTANDING_ACTIONS = new Set([
+  "SHOW_CATEGORIES",
+  "SHOW_CATALOG",
+  "SEARCH_PRODUCT",
+  "TRACK_ORDER",
+  "SUPPORT",
+  "JUST_CHAT"
+]);
+
+const OPEN_UNDERSTANDING_CATEGORY_TTL =
+  10 * 60 * 1000;
+
+let openUnderstandingCategories = {
+  list: [],
+  fetchedAt: 0
+};
+
+function looksLikeIndirectEnquiry(text) {
+  const normalized = normalizeMessage(text);
+
+  if (!normalized || normalized.length < 3) {
+    return false;
+  }
+
+  if (isCategoryBrowseRequest(normalized)) {
+    return true;
+  }
+
+  if (isStoreInventoryQuestion(normalized)) {
+    return true;
+  }
+
+  const words = normalized
+    .split(" ")
+    .filter(Boolean);
+
+  const questionOrChatWords =
+    /\b(what|which|who|where|how|can|could|do|does|did|is|are|wetin|abeg|sell|sold|offers?|available|stock|carry|dey|track|tracking|delivery|deliver|refund)\b/;
+
+  if (
+    words.length >= 3 &&
+    questionOrChatWords.test(normalized)
+  ) {
+    return true;
+  }
+
+  // Catches mistyped "buy from you" endings
+  // such as "buy fro you" or "buy frm you".
+
+  if (
+    /\b(buy|purchase|order|get|shop)\b.{0,15}\b(fro?m?|frm|for)\s*(you|una|u)\b/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+async function getOpenUnderstandingCategories() {
+  const now = Date.now();
+
+  if (
+    now - openUnderstandingCategories.fetchedAt <
+    OPEN_UNDERSTANDING_CATEGORY_TTL
+  ) {
+    return openUnderstandingCategories.list;
+  }
+
+  try {
+    const result = await getCategories();
+
+    const categories =
+      result && result.success === true
+        ? getCategoriesList(result)
+        : [];
+
+    if (categories.length) {
+      openUnderstandingCategories = {
+        list: categories,
+        fetchedAt: now
+      };
+    } else {
+      openUnderstandingCategories.fetchedAt = now;
+    }
+
+  } catch (error) {
+    console.error(
+      "Open understanding category fetch failed:",
+      error.message
+    );
+
+    openUnderstandingCategories.fetchedAt = now;
+  }
+
+  return openUnderstandingCategories.list;
+}
+
+async function understandFreeTextWithAI(
+  text,
+  categories
+) {
+  try {
+    const client = getGroqClient();
+
+    const categoryList = categories.length
+      ? categories.join(", ")
+      : "unknown right now";
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You are the understanding engine for ${STORE_NAME}, a Nigerian solar energy and electrical equipment store on WhatsApp.
+
+The customer's message may be indirect, informal, badly typed or in Nigerian Pidgin. Understand what they REALLY want, no matter how they phrase it. Think outside the box.
+
+Decide ONE action:
+
+SHOW_CATEGORIES - they want to see what the store sells, browse or explore, and no specific product is mentioned. Examples: "what can we buy fro you", "what can we buy from you people", "wetin una dey sell", "abeg wetin una get", "i just wan check wetin dey"
+
+SHOW_CATALOG - they clearly want to see the full list of every product. Examples: "show me everything", "i want to see all the products you have"
+
+SEARCH_PRODUCT - one specific product, brand, size or part is mentioned, even badly spelt. Put the cleanest product search words in search_term (maximum 5 words, never a full sentence). Examples: "i need 5kva inveter" -> search_term "5kVA inverter", "abeg i wan buy panel" -> "solar panel", "how much na litum battery" -> "lithium battery"
+
+TRACK_ORDER - they want to check or follow up on an existing order or delivery.
+
+SUPPORT - they want a human, or have a payment, delivery, refund or complaint problem.
+
+JUST_CHAT - everything else: technical questions, advice requests, small talk, greetings, or anything that is not clearly a shopping action above. Examples: "how does an inverter work", "which panel is best for my roof", "good morning"
+
+RULES:
+- Reply with ONLY this JSON and nothing else:
+{"action":"...","search_term":"..."}
+- search_term must be "" unless the action is SEARCH_PRODUCT.
+- Choose SEARCH_PRODUCT only when a concrete product, brand or size is mentioned; otherwise choose SHOW_CATEGORIES.
+- Never invent products or categories.
+
+The store categories are: ${categoryList}`
+          },
+          {
+            role: "user",
+            content: String(text).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 80,
+        stream: false
+      });
+
+    const raw =
+      completion.choices?.[0]?.message?.content || "";
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const action = String(parsed.action || "")
+      .trim()
+      .toUpperCase();
+
+    if (!OPEN_UNDERSTANDING_ACTIONS.has(action)) {
+      return null;
+    }
+
+    let searchTerm = String(
+      parsed.search_term || ""
+    ).trim().slice(0, 60);
+
+    if (action !== "SEARCH_PRODUCT") {
+      searchTerm = "";
+    }
+
+    return { action, searchTerm };
+
+  } catch (error) {
+    console.error(
+      "AI open understanding error:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+async function handleOpenUnderstanding(jid, text) {
+  if (!AI_OPEN_UNDERSTANDING_ENABLED) return false;
+
+  const trimmed = String(text || "").trim();
+
+  if (trimmed.length < 3) return false;
+
+  if (isGreetingOrAcknowledgement(trimmed)) {
+    return false;
+  }
+
+  // Short plain product phrases already have
+  // a fast keyword route; keep them on it,
+  // unless the phrase reads like an indirect
+  // enquiry that needs real understanding.
+
+  if (
+    shouldTryCatalogSearch(trimmed) &&
+    !looksLikeIndirectEnquiry(trimmed)
+  ) {
+    return false;
+  }
+
+  if (isTechnicalQuestion(trimmed)) return false;
+
+  console.log(
+    "AI open understanding: interpreting message:",
+    trimmed.slice(0, 120)
+  );
+
+  const categories =
+    await getOpenUnderstandingCategories();
+
+  const decision = await understandFreeTextWithAI(
+    trimmed,
+    categories
+  );
+
+  if (!decision) {
+    console.log(
+      "AI open understanding: no confident decision, using the normal flow."
+    );
+
+    return false;
+  }
+
+  console.log(
+    "AI open understanding decision:",
+    decision
+  );
+
+  switch (decision.action) {
+    case "SHOW_CATEGORIES":
+      await showCategories(jid);
+      return true;
+
+    case "SHOW_CATALOG":
+      await showProducts(jid, "");
+      return true;
+
+    case "SEARCH_PRODUCT": {
+      if (decision.searchTerm) {
+        await showProducts(jid, decision.searchTerm);
+      } else {
+        await showCategories(jid);
+      }
+
+      return true;
+    }
+
+    case "TRACK_ORDER":
+      conversations.set(jid, {
+        stage: "order_number"
+      });
+
+      await sendText(
+        jid,
+        "Please enter your order number."
+      );
+
+      return true;
+
+    case "SUPPORT":
+      conversations.delete(jid);
+
+      await sendCustomerServiceDetails(
+        jid,
+        "I'll connect you with our customer service team. You can also reach them directly using the details below."
+      );
+
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+// ====== END AI OPEN UNDERSTANDING BLOCK ======
+
 async function answerProductListQuestion(
   jid,
   text,
@@ -1107,7 +1417,7 @@ async function answerProductListQuestion(
 
 The customer is currently viewing this list of REAL products from the store database:
 
- ${productListText}
+${productListText}
 
 CRITICAL RULES:
 - Recommend or discuss ONLY the products in this list.
@@ -1230,7 +1540,7 @@ Current step: ${stage}.
 At this step, ${stageRequirement}.
 
 Order details captured so far:
- ${orderSummary}
+${orderSummary}
 
 RULES:
 - Answer the customer's question briefly, friendly and professionally.
@@ -1963,6 +2273,7 @@ export function getAIAutomationStatus() {
     chatRestartInactivityMinutes: Math.round(
       CHAT_RESTART_INACTIVITY_MS / 60000
     ),
+    openUnderstanding: AI_OPEN_UNDERSTANDING_ENABLED,
     groqModel: GROQ_MODEL,
     transcriptionModel: GROQ_TRANSCRIBE_MODEL,
     visionModel: GROQ_VISION_MODEL,
@@ -3088,6 +3399,38 @@ async function showProducts(
     );
 
     if (!products.length) {
+      // AI ENHANCEMENT: if the "search term" is
+      // really an indirect enquiry in disguise
+      // (the customer typed a whole question),
+      // skip the dead-end message and show the
+      // store instead.
+
+      if (
+        searchTerm &&
+        !category &&
+        !isAIRetry &&
+        looksLikeIndirectEnquiry(searchTerm)
+      ) {
+        console.log(
+          "AI open understanding: treating failed search as a general enquiry:",
+          searchTerm
+        );
+
+        state.products = [];
+        state.stage = "browse_empty";
+
+        conversations.set(jid, state);
+
+        await sendText(
+          jid,
+          "It sounds like you're asking what we have in stock 😊 — let me show you our store."
+        );
+
+        await showCategories(jid);
+
+        return;
+      }
+
       // AI ENHANCEMENT: one automatic AI-corrected
       // retry when a search returns no products
       // (fixes spelling and brand name mistakes)
@@ -4251,6 +4594,20 @@ them to a human agent.`
     );
 
     return;
+  }
+
+  // AI ENHANCEMENT: outside-the-box understanding
+  // of indirect, informal or mistyped requests
+  // (e.g. "what can we buy fro you") when the
+  // customer is not inside an order flow.
+
+  if (!state.stage) {
+    const handledByOpenUnderstanding =
+      await handleOpenUnderstanding(jid, text);
+
+    if (handledByOpenUnderstanding) {
+      return;
+    }
   }
 
   // DIRECT PRODUCT SEARCH ROUTING
