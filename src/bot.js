@@ -98,7 +98,6 @@ function loadWelcomedCustomers() {
     console.log(
       `Loaded ${welcomedCustomers.size} previously welcomed customers.`
     );
-
   } catch (error) {
     console.error(
       "Welcome registry loading error:",
@@ -126,7 +125,6 @@ function saveWelcomedCustomers() {
       temporaryFile,
       WELCOME_REGISTRY_FILE
     );
-
   } catch (error) {
     console.error(
       "Welcome registry saving error:",
@@ -163,13 +161,8 @@ function getStoreDateParts(date = new Date()) {
 function getTimeGreeting() {
   const { hour } = getStoreDateParts();
 
-  if (hour >= 5 && hour < 12) {
-    return "Good morning";
-  }
-
-  if (hour >= 12 && hour < 17) {
-    return "Good afternoon";
-  }
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
 
   return "Good evening";
 }
@@ -470,18 +463,37 @@ backup duration and budget.
 If a customer gives technical requirements,
 help identify the type of products they may need.
 
-3. LIVE PRODUCT DATABASE
+3. LIVE PRODUCT DATABASE — CRITICAL RULES
 
-Product names, prices, discounts, brands, descriptions,
-categories, SKUs and stock quantities must come from
-the actual ecommerce database.
+The actual product catalogue and categories are stored
+in the Divine Solar Hub ecommerce database.
 
-Never invent products, prices or stock.
+You MUST NOT invent, assume, guess or hardcode product
+names, categories, brands, prices, descriptions or stock.
 
-Never claim a product is available unless the application
-has checked the actual product API.
+Never generate example product categories as if they
+are actually available in the store.
 
-Never pretend that you have checked the database.
+Never create a list of products based on general
+knowledge of solar shops.
+
+The application retrieves actual categories and
+products from the ecommerce database.
+
+When a customer asks what products are available,
+what the store sells, or what categories exist,
+the application must use the live category API.
+
+When a customer asks to see products, the application
+must use the live product API.
+
+If the database has no categories or products,
+the application must say so.
+
+If the database request fails, explain that the
+catalogue cannot be retrieved at the moment.
+
+Never pretend that you checked the database.
 
 4. TECHNICAL QUESTIONS
 
@@ -595,15 +607,35 @@ function isCategoryBrowseRequest(message) {
   const text = normalizeMessage(message);
 
   const patterns = [
-    /\bthe products? in (this|your|the) store\b/,
-    /\bproducts? in (this|your|the) store\b/,
-    /\bproducts? available in (this|your|the) store\b/,
-    /\bwhat products? do you have\b/,
-    /\bwhat products? are available\b/,
-    /\bwhat items? do you sell\b/,
+    // General inventory questions
+    /\bwhat products can i get\b/,
+    /\bwhat products can i get here\b/,
+    /\bwhat can i get here\b/,
+    /\bwhat can i buy here\b/,
+    /\bwhat products do you have\b/,
+    /\bwhat products do you have here\b/,
+    /\bwhat products are in your store\b/,
+    /\bwhat products are available\b/,
+    /\bwhat products are available here\b/,
+    /\bwhat do you have in your store\b/,
+    /\bwhat do you have here\b/,
     /\bwhat do you sell\b/,
+    /\bwhat can i buy from you\b/,
+    /\bwhat items do you sell\b/,
+    /\bwhat items are available\b/,
+    /\bwhat is available in your store\b/,
+    /\bwhat is available here\b/,
     /\bwhat do you offer\b/,
-    /\bwhat can i buy (here|from you|in this store)\b/,
+    /\bwhat can your store offer\b/,
+    /\bwhat can i get from your shop\b/,
+    /\btell me what products you have\b/,
+    /\bwhat products are in this store\b/,
+    /\bso what products can i get here\b/,
+
+    // Existing category questions
+    /\bthe products in (this|your|the) store\b/,
+    /\bproducts in (this|your|the) store\b/,
+    /\bproducts available in (this|your|the) store\b/,
     /\bshow me (all |every )?(your )?categories\b/,
     /\bshow (all |every )?(the )?(product )?categories\b/,
     /\blist (all |every )?(the )?(product )?categories\b/,
@@ -622,11 +654,29 @@ function isCategoryBrowseRequest(message) {
     /\bi want to browse your products\b/,
     /\bthe products available here\b/,
     /\bshow me your products and categories\b/,
-    /\bi want to see the products here\b/,
-    /\bwhat is available in your store\b/
+    /\bi want to see the products here\b/
   ];
 
   return patterns.some(pattern => pattern.test(text));
+}
+
+// ==========================================
+// GENERAL STORE INVENTORY DETECTION
+// ==========================================
+
+function isStoreInventoryQuestion(message) {
+  const text = normalizeMessage(message);
+
+  const inventoryWords =
+    /\b(products?|items?|goods|stock|inventory|selling|available|availability|store|shop|catalog|catalogue)\b/i;
+
+  const questionWords =
+    /\b(what|which|show|list|see|view|browse|buy|offer|carry|available)\b/i;
+
+  return (
+    inventoryWords.test(text) &&
+    questionWords.test(text)
+  );
 }
 
 // ==========================================
@@ -685,6 +735,7 @@ function isExplicitProductRequest(message) {
   const text = String(message || "").trim();
 
   if (isCategoryBrowseRequest(text)) return false;
+  if (isStoreInventoryQuestion(text)) return false;
   if (isCatalogBrowseRequest(text)) return false;
 
   return /\b(do you have|have you got|do you sell|i want to buy|i want|i need|looking for|show me|find me|search for|how much is|how much does|what is the price|what's the price|price of|available for sale|in stock|buy|purchase|order|product price|check availability)\b/i.test(text);
@@ -700,6 +751,7 @@ function shouldTryCatalogSearch(message) {
   if (!text) return false;
 
   if (isCategoryBrowseRequest(text)) return false;
+  if (isStoreInventoryQuestion(text)) return false;
   if (isCatalogBrowseRequest(text)) return false;
   if (isGreetingOrAcknowledgement(text)) return false;
   if (isTechnicalQuestion(text)) return false;
@@ -722,6 +774,7 @@ function extractProductSearchTerm(message = "") {
 
   if (
     isCategoryBrowseRequest(search) ||
+    isStoreInventoryQuestion(search) ||
     isCatalogBrowseRequest(search)
   ) {
     return "";
@@ -761,6 +814,7 @@ function fallbackIntent(message) {
   const text = normalizeMessage(message);
 
   if (isCategoryBrowseRequest(text)) return "CATEGORY";
+  if (isStoreInventoryQuestion(text)) return "CATEGORY";
   if (isCatalogBrowseRequest(text)) return "CATALOG";
 
   if (isGreetingOrAcknowledgement(text)) {
@@ -814,7 +868,8 @@ SUPPORT
 QUESTION
 
 CATEGORY:
-The customer wants to see the store's product categories.
+The customer wants to know what the store sells or
+wants to see the store's product categories.
 
 Examples:
 "The products in this store"
@@ -823,6 +878,11 @@ Examples:
 "Show me all categories"
 "List your product categories"
 "What products are available in your store?"
+"What products can I get here?"
+"So what products can I get here?"
+"What can I buy here?"
+"What do you have in your store?"
+"What items are available here?"
 
 CATALOG:
 The customer explicitly wants to see all actual products.
@@ -860,6 +920,8 @@ A technical question about how a product works is
 QUESTION, not PRODUCT.
 
 "The products in this store" is CATEGORY, not PRODUCT.
+
+"What products can I get here?" is CATEGORY.
 
 Return only the label.
 `
@@ -1195,7 +1257,6 @@ async function sendFounderWelcome(jid) {
       error.message
     );
 
-    // Text fallback if the image cannot be sent.
     try {
       await sendText(jid, caption);
 
@@ -1499,9 +1560,17 @@ async function showCategories(jid) {
   conversations.set(jid, state);
 
   try {
-    console.log("Fetching categories from ecommerce database.");
+    console.log(
+      "Fetching categories directly from ecommerce database."
+    );
 
     const result = await getCategories();
+
+    // Log the actual response to diagnose API shape issues.
+    console.log(
+      "Raw categories API response:",
+      JSON.stringify(result).slice(0, 5000)
+    );
 
     if (!result || result.success !== true) {
       throw new Error(
@@ -1511,7 +1580,10 @@ async function showCategories(jid) {
 
     const categories = getCategoriesList(result);
 
-    console.log("Categories received:", categories);
+    console.log(
+      "Categories received from database:",
+      categories
+    );
 
     if (!categories.length) {
       state.stage = "browse_empty";
@@ -1549,7 +1621,10 @@ async function showCategories(jid) {
     await sendText(jid, response);
 
   } catch (error) {
-    console.error("Category retrieval error:", error.message);
+    console.error(
+      "Category retrieval error:",
+      error.message
+    );
 
     state.stage = "browse_empty";
     state.categories = [];
@@ -1948,10 +2023,21 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // CATEGORY REQUEST
+  // ========================================
+  // DATABASE-FIRST STORE INVENTORY ROUTING
+  // ========================================
 
-  if (isCategoryBrowseRequest(text)) {
-    console.log("Customer requested categories:", text);
+  // These questions must NEVER be answered by Groq.
+  // They must retrieve the actual database categories.
+
+  if (
+    isCategoryBrowseRequest(text) ||
+    isStoreInventoryQuestion(text)
+  ) {
+    console.log(
+      "Customer asked about store inventory. Fetching live database categories:",
+      text
+    );
 
     await showCategories(jid);
     return;
@@ -2476,20 +2562,6 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // DIRECT CATEGORY ROUTING
-
-  if (isCategoryBrowseRequest(text)) {
-    await showCategories(jid);
-    return;
-  }
-
-  // DIRECT CATALOGUE ROUTING
-
-  if (isCatalogBrowseRequest(text)) {
-    await showProducts(jid, "");
-    return;
-  }
-
   // DIRECT PRODUCT SEARCH ROUTING
 
   if (isExplicitProductRequest(text)) {
@@ -2708,7 +2780,6 @@ export async function startWhatsApp() {
   try {
     fs.mkdirSync(AUTH_FOLDER, { recursive: true });
 
-    // Load persistent customer welcome records.
     loadWelcomedCustomers();
 
     console.log(
@@ -2911,7 +2982,7 @@ export async function startWhatsApp() {
                   await sendFounderWelcome(jid);
 
                 // The welcome already answers a first-time greeting.
-                // Avoid sending a second unnecessary greeting.
+                // Do not suppress a customer's actual product question.
                 if (
                   firstWelcome &&
                   isGreetingOrAcknowledgement(text)
