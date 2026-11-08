@@ -10,6 +10,7 @@ import P from "pino";
 import QRCode from "qrcode";
 import Groq from "groq-sdk";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 import {
@@ -75,6 +76,73 @@ const DEDUPE_TTL_MS = 10 * 60 * 1000;
 const MAX_DEDUPE_ENTRIES = 5000;
 
 const PRODUCTS_PER_PAGE = 8;
+
+// ==========================================
+// AI AUTOMATION SETTINGS (NEW ADD-ONS)
+// Every feature below is an optional add-on.
+// The original store logic is untouched.
+// Set any variable to "false" in your .env
+// file to switch that feature off.
+// ==========================================
+
+// 1. Voice note transcription (Groq Whisper)
+
+const AI_VOICE_ENABLED =
+  process.env.AI_VOICE_ENABLED !== "false";
+
+const GROQ_TRANSCRIBE_MODEL =
+  process.env.GROQ_TRANSCRIBE_MODEL ||
+  "whisper-large-v3";
+
+const MAX_VOICE_SECONDS =
+  Number(process.env.MAX_VOICE_SECONDS) || 300;
+
+const MAX_VOICE_BYTES = 25 * 1024 * 1024;
+
+// 2. Image recognition (Groq vision model)
+
+const AI_VISION_ENABLED =
+  process.env.AI_VISION_ENABLED !== "false";
+
+const GROQ_VISION_MODEL =
+  process.env.GROQ_VISION_MODEL ||
+  "meta-llama/llama-4-scout-17b-16e-instruct";
+
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+// 3. AI-corrected search retry
+
+const AI_SMART_SEARCH_ENABLED =
+  process.env.AI_SMART_SEARCH_ENABLED !== "false";
+
+// 4. AI category matching
+
+const AI_CATEGORY_MATCHING_ENABLED =
+  process.env.AI_CATEGORY_MATCHING_ENABLED !== "false";
+
+// 5. AI product advisor on live product lists
+
+const AI_PRODUCT_ADVISOR_ENABLED =
+  process.env.AI_PRODUCT_ADVISOR_ENABLED !== "false";
+
+// 6. AI order flow assistant
+
+const AI_ORDER_ASSISTANT_ENABLED =
+  process.env.AI_ORDER_ASSISTANT_ENABLED !== "false";
+
+// 7. Post-order product suggestions
+
+const AI_CROSS_SELL_ENABLED =
+  process.env.AI_CROSS_SELL_ENABLED !== "false";
+
+// 8. Automatic follow-up reminders
+
+const AI_FOLLOW_UP_ENABLED =
+  process.env.AI_FOLLOW_UP_ENABLED !== "false";
+
+const AI_FOLLOW_UP_DELAY_MS =
+  Number(process.env.AI_FOLLOW_UP_DELAY_MS) ||
+  10 * 60 * 1000;
 
 // ==========================================
 // PERSISTENT CUSTOMER WELCOME REGISTRY
@@ -800,6 +868,987 @@ async function askCustomerAI(jid, question) {
       "at the moment. Please try again shortly. 😊"
     );
   }
+}
+
+// ==========================================
+// AI AUTOMATION ENGINE (NEW ADD-ONS)
+// The functions below only ADD intelligence.
+// They never replace the original store
+// logic; on any failure they fall back to
+// the original behaviour.
+// ==========================================
+
+function isConversationalQuestion(message) {
+  const text = String(message || "").trim();
+
+  if (!text) return false;
+
+  if (text.includes("?")) return true;
+
+  if (isTechnicalQuestion(text)) return true;
+
+  return /^(which|what|who|why|how|can|could|should|is|are|do|does|did|please|recommend|suggest|advice|advise|help me choose)\b/i.test(
+    text
+  );
+}
+
+function isFrustratedCustomer(message) {
+  const text = normalizeMessage(message);
+
+  const patterns = [
+    /\bthis is (a )?(scam|nonsense|rubbish|fraud|joke)\b/,
+    /\b(you people|your company|your store|your staff) (are|is) (useless|scammers|fraudsters|crazy|stupid|wicked)\b/,
+    /\bi am (so |very )?(angry|tired|fed up|disappointed|upset)\b/,
+    /\bvery (angry|disappointed|upset)\b/,
+    /\buseless (service|company|store|bot|app|people)\b/,
+    /\bworst (service|company|store|experience)\b/,
+    /\brefund my money\b/,
+    /\bscam(mers?|ming)?\b/,
+    /\bfraud(sters?|ulent)?\b/,
+    /\bno response (from|since|for)\b/,
+    /\bhow many times (do i|must i|should i|will i)\b/,
+    /\bi give up\b/
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
+}
+
+async function getAISearchSuggestion(searchTerm) {
+  try {
+    const client = getGroqClient();
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You correct product search phrases for ${STORE_NAME}, a Nigerian solar energy and electrical equipment store.
+
+Correct the customer's search phrase for spelling mistakes, brand name spellings, spacing and product naming.
+
+Examples:
+"jinko solar pannel" -> "Jinko solar panel"
+"inveter 5kva" -> "5kVA inverter"
+"litum battery" -> "lithium battery"
+"gel batery 220ah" -> "220Ah gel battery"
+"tublar batterys" -> "tubular batteries"
+
+RULES:
+- Return ONLY the corrected search phrase.
+- Maximum 6 words.
+- Do not add products that were not mentioned.
+- Do not answer, explain or use quotes.`
+          },
+          {
+            role: "user",
+            content: String(searchTerm).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0,
+        max_tokens: 40,
+        stream: false
+      });
+
+    const suggestion =
+      completion.choices?.[0]?.message?.content
+        ?.trim()
+        .replace(/^["']+|["']+$/g, "") || "";
+
+    if (
+      !suggestion ||
+      suggestion.length > 60 ||
+      suggestion.includes("\n")
+    ) {
+      return "";
+    }
+
+    return suggestion;
+
+  } catch (error) {
+    console.error(
+      "AI search suggestion error:",
+      error.message
+    );
+
+    return "";
+  }
+}
+
+async function matchCategoryWithAI(text, categories) {
+  try {
+    const client = getGroqClient();
+
+    const categoryList = categories
+      .map(
+        (category, index) =>
+          `${index + 1}. ${category}`
+      )
+      .join("\n");
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You match a customer's message to ONE product category from the official category list of ${STORE_NAME}.
+
+OFFICIAL CATEGORIES:
+${categoryList}
+
+RULES:
+- If one category clearly matches what the customer is looking for, return ONLY that category name exactly as written in the list above.
+- If no category clearly matches, return ONLY: NONE
+- Never invent a category that is not in the list.
+- Do not explain. Return only the category name or NONE.`
+          },
+          {
+            role: "user",
+            content: String(text).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0,
+        max_tokens: 30,
+        stream: false
+      });
+
+    const answer =
+      completion.choices?.[0]?.message?.content
+        ?.trim() || "";
+
+    if (!answer || /^NONE$/i.test(answer)) {
+      return "";
+    }
+
+    if (answer.length > 60) return "";
+
+    const matchedCategory = categories.find(
+      category =>
+        category.toLowerCase() ===
+        answer.toLowerCase()
+    );
+
+    return matchedCategory || "";
+
+  } catch (error) {
+    console.error(
+      "AI category matching error:",
+      error.message
+    );
+
+    return "";
+  }
+}
+
+async function answerProductListQuestion(
+  jid,
+  text,
+  products
+) {
+  try {
+    if (!AI_PRODUCT_ADVISOR_ENABLED) return false;
+
+    if (
+      !Array.isArray(products) ||
+      !products.length
+    ) {
+      return false;
+    }
+
+    if (!isConversationalQuestion(text)) return false;
+
+    const productListText = products
+      .map((product, index) => {
+        const stock = Number(
+          product.countInStock || 0
+        );
+
+        return (
+          `${index + 1}. ${product.name} | ` +
+          `${formatNaira(productPrice(product))} | ` +
+          `Brand: ${product.brand || "N/A"} | ` +
+          `Stock: ${stock > 0 ? stock : "Out of stock"}`
+        );
+      })
+      .join("\n");
+
+    const client = getGroqClient();
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You are the shopping assistant for ${STORE_NAME}, a solar energy and electrical products business in Nigeria.
+
+The customer is currently viewing this list of REAL products from the store database:
+
+${productListText}
+
+CRITICAL RULES:
+- Recommend or discuss ONLY the products in this list.
+- Never invent products, brands, prices or stock.
+- If the customer asks which product is best, compare using the listed prices, brands and stock.
+- Keep the answer short, friendly and in WhatsApp style with emojis where appropriate.
+- To buy a product, the customer should reply with its number from the list.`
+          },
+          {
+            role: "user",
+            content: String(text).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 500,
+        stream: false
+      });
+
+    const answer =
+      completion.choices?.[0]?.message?.content
+        ?.trim() || "";
+
+    if (!answer) return false;
+
+    await sendText(jid, answer);
+
+    return true;
+
+  } catch (error) {
+    console.error(
+      "AI product advisor error:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
+const ORDER_STAGE_CONTEXT = {
+  quantity:
+    "the customer must reply with the quantity they want to order",
+  full_name:
+    "the customer must reply with their full name for delivery",
+  phone:
+    "the customer must reply with their delivery phone number. For security it must match their WhatsApp number",
+  address:
+    "the customer must reply with their delivery street or house address",
+  city:
+    "the customer must reply with their city or town",
+  state:
+    "the customer must reply with their state in Nigeria",
+  zipCode:
+    "the customer must reply with their delivery postcode or ZIP code",
+  order_number:
+    "the customer must reply with their order number so the store can look it up",
+  order_phone:
+    "the customer must reply with the phone number used when placing the order they want to track"
+};
+
+function buildOrderSummaryText(state = {}) {
+  const lines = [];
+
+  if (state.product?.name) {
+    lines.push(`Product: ${state.product.name}`);
+  }
+
+  if (state.quantity) {
+    lines.push(`Quantity: ${state.quantity}`);
+  }
+
+  if (state.fullName) {
+    lines.push(`Name: ${state.fullName}`);
+  }
+
+  if (state.address) {
+    lines.push(`Address: ${state.address}`);
+  }
+
+  if (state.city) {
+    lines.push(`City: ${state.city}`);
+  }
+
+  if (state.state) {
+    lines.push(`State: ${state.state}`);
+  }
+
+  return lines.length
+    ? lines.join("\n")
+    : "No order details captured yet.";
+}
+
+async function getAIOrderFlowAnswer(
+  text,
+  stage,
+  state
+) {
+  try {
+    const client = getGroqClient();
+
+    const stageRequirement =
+      ORDER_STAGE_CONTEXT[stage] ||
+      "the customer must continue the current step";
+
+    const orderSummary = buildOrderSummaryText(state);
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You are the automated order assistant for ${STORE_NAME}, a solar energy and electrical products business in Nigeria.
+
+The customer is in the middle of an automated WhatsApp order or tracking flow.
+
+Current step: ${stage}.
+At this step, ${stageRequirement}.
+
+Order details captured so far:
+${orderSummary}
+
+RULES:
+- Answer the customer's question briefly, friendly and professionally.
+- Use short WhatsApp-style paragraphs.
+- After answering, remind the customer what to send at this step.
+- Never request passwords, payment card details or private OTPs.
+- Never claim that payment has been received.
+- Never invent delivery fees, delivery dates or stock.
+- If the question is unrelated, answer briefly and then remind them of the current step.
+
+Return only the reply message.`
+          },
+          {
+            role: "user",
+            content: String(text).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+        stream: false
+      });
+
+    return completion.choices?.[0]?.message?.content
+      ?.trim() || "";
+
+  } catch (error) {
+    console.error(
+      "AI order flow assistant error:",
+      error.message
+    );
+
+    return "";
+  }
+}
+
+async function handleOrderFlowQuestion(
+  jid,
+  text,
+  stage,
+  state
+) {
+  if (!AI_ORDER_ASSISTANT_ENABLED) return false;
+
+  if (!isConversationalQuestion(text)) return false;
+
+  const answer = await getAIOrderFlowAnswer(
+    text,
+    stage,
+    state
+  );
+
+  if (!answer) return false;
+
+  console.log(
+    "AI answered a mid-flow order question:",
+    { stage }
+  );
+
+  await sendText(jid, answer);
+
+  return true;
+}
+
+async function parseQuantityWithAI(text) {
+  try {
+    if (!AI_ORDER_ASSISTANT_ENABLED) return null;
+
+    const clean = String(text || "").trim();
+
+    if (!clean || clean.length > 30) return null;
+
+    if (clean.includes("?")) return null;
+
+    const client = getGroqClient();
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `Extract the quantity of items the customer wants to order from their message.
+
+Examples:
+"two" -> 2
+"I need 3 pieces" -> 3
+"five units please" -> 5
+"one" -> 1
+
+RULES:
+- Return ONLY a whole number between 1 and 100.
+- If no quantity is present, return ONLY: NONE`
+          },
+          {
+            role: "user",
+            content: clean
+          }
+        ],
+        temperature: 0,
+        max_tokens: 10,
+        stream: false
+      });
+
+    const raw =
+      completion.choices?.[0]?.message?.content
+        ?.trim() || "";
+
+    if (!raw || /^NONE$/i.test(raw)) return null;
+
+    const parsed = Number(raw.replace(/[^\d]/g, ""));
+
+    if (
+      !Number.isInteger(parsed) ||
+      parsed < 1 ||
+      parsed > 100
+    ) {
+      return null;
+    }
+
+    return parsed;
+
+  } catch (error) {
+    console.error(
+      "AI quantity parsing error:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+async function downloadWhatsAppMedia(message) {
+  try {
+    const baileys = await import(
+      "@whiskeysockets/baileys"
+    );
+
+    if (
+      !baileys ||
+      typeof baileys.downloadMediaMessage !== "function"
+    ) {
+      console.error(
+        "Media download is not supported by this Baileys version."
+      );
+
+      return null;
+    }
+
+    const buffer = await baileys.downloadMediaMessage(
+      message,
+      "buffer",
+      {},
+      {
+        logger,
+        reuploadRequest:
+          sock?.updateMediaMessage
+      }
+    );
+
+    if (
+      !Buffer.isBuffer(buffer) ||
+      !buffer.length
+    ) {
+      return null;
+    }
+
+    return buffer;
+
+  } catch (error) {
+    console.error(
+      "WhatsApp media download error:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
+async function transcribeAudioBuffer(audioBuffer) {
+  let temporaryFile = "";
+
+  try {
+    const client = getGroqClient();
+
+    temporaryFile = path.join(
+      os.tmpdir(),
+      `voice-note-${Date.now()}-${Math.floor(
+        Math.random() * 100000
+      )}.ogg`
+    );
+
+    fs.writeFileSync(temporaryFile, audioBuffer);
+
+    let audioFile = null;
+
+    try {
+      const groqSdk = await import("groq-sdk");
+
+      if (typeof groqSdk.toFile === "function") {
+        audioFile = await groqSdk.toFile(
+          fs.createReadStream(temporaryFile),
+          "voice-note.ogg",
+          { type: "audio/ogg" }
+        );
+      }
+    } catch (error) {
+      audioFile = null;
+    }
+
+    if (!audioFile) {
+      audioFile = fs.createReadStream(temporaryFile);
+    }
+
+    const transcription =
+      await client.audio.transcriptions.create({
+        model: GROQ_TRANSCRIBE_MODEL,
+        file: audioFile
+      });
+
+    return String(
+      transcription?.text || ""
+    ).trim();
+
+  } catch (error) {
+    console.error(
+      "Groq voice transcription error:",
+      error.message
+    );
+
+    return "";
+
+  } finally {
+    if (temporaryFile) {
+      try {
+        fs.unlinkSync(temporaryFile);
+      } catch (error) {}
+    }
+  }
+}
+
+async function describeImageEnquiry(imageBuffer) {
+  try {
+    const client = getGroqClient();
+
+    const base64Image =
+      imageBuffer.toString("base64");
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_VISION_MODEL,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `You identify products in images for ${STORE_NAME}, a solar energy and electrical equipment store in Nigeria.
+
+Look at the image and identify the main product or equipment visible.
+
+Reply with ONLY a short product search phrase of at most 5 words describing it for a solar and electrical equipment store.
+
+Examples:
+"5kVA inverter"
+"100Ah lithium battery"
+"400W monocrystalline solar panel"
+"solar charge controller"
+
+If the image does not clearly show a product or equipment, reply with only: UNSURE`
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`
+                }
+              }
+            ]
+          }
+        ],
+        temperature: 0.2,
+        max_tokens: 300,
+        stream: false
+      });
+
+    return completion.choices?.[0]?.message?.content
+      ?.trim() || "";
+
+  } catch (error) {
+    console.error(
+      "Groq vision error:",
+      error.message
+    );
+
+    return "";
+  }
+}
+
+async function extractTextFromMedia(message, jid) {
+  try {
+    if (!isConnected()) return "";
+
+    const content = message?.message;
+
+    if (!content) return "";
+
+    // 1. VOICE NOTES AND AUDIO MESSAGES
+
+    if (content.audioMessage) {
+      if (!AI_VOICE_ENABLED) return "";
+
+      const seconds = Number(
+        content.audioMessage.seconds || 0
+      );
+
+      if (seconds > MAX_VOICE_SECONDS) {
+        console.log(
+          "Voice note ignored: too long.",
+          seconds,
+          "seconds."
+        );
+
+        try {
+          await sendText(
+            jid,
+            "I received your voice note, but it is too long for me to listen to. 🎙️\n\nPlease send a shorter voice note, or simply type your message and I will respond immediately. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      console.log(
+        "AI voice note received. Transcribing with Groq Whisper..."
+      );
+
+      const audioBuffer =
+        await downloadWhatsAppMedia(message);
+
+      if (!audioBuffer) {
+        try {
+          await sendText(
+            jid,
+            "I received your voice note but couldn't download it. 🎙️\n\nPlease try sending it again, or type your message instead. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      if (audioBuffer.length > MAX_VOICE_BYTES) {
+        try {
+          await sendText(
+            jid,
+            "I received your voice note, but the file is too large for me to listen to. 🎙️\n\nPlease type your message instead. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      const transcript =
+        await transcribeAudioBuffer(audioBuffer);
+
+      if (!transcript) {
+        try {
+          await sendText(
+            jid,
+            "I received your voice note but couldn't understand it clearly. 🎙️\n\nPlease try sending it again, or type your message and I will respond immediately. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      console.log(
+        "Voice note transcription:",
+        transcript
+      );
+
+      return transcript;
+    }
+
+    // 2. IMAGES WITHOUT CAPTION (AI VISION)
+
+    if (content.imageMessage) {
+      if (!AI_VISION_ENABLED) return "";
+
+      console.log(
+        "AI image received. Identifying the product with Groq vision..."
+      );
+
+      const imageBuffer =
+        await downloadWhatsAppMedia(message);
+
+      if (!imageBuffer) {
+        try {
+          await sendText(
+            jid,
+            "I received your image but couldn't open it. 📷\n\nPlease try sending it again, or tell me what you're looking for. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      if (imageBuffer.length > MAX_IMAGE_BYTES) {
+        try {
+          await sendText(
+            jid,
+            "I received your image, but the file is too large for me to view. 📷\n\nPlease send a smaller image or tell me what you're looking for. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      const enquiry =
+        await describeImageEnquiry(imageBuffer);
+
+      if (!enquiry || /^UNSURE$/i.test(enquiry)) {
+        try {
+          await sendText(
+            jid,
+            "I received your image but couldn't identify a product in it clearly. 📷\n\nCould you tell me what you're looking for? You can also type MENU to browse our store. 😊"
+          );
+        } catch (error) {}
+
+        return "";
+      }
+
+      console.log(
+        "AI image enquiry:",
+        enquiry
+      );
+
+      return enquiry;
+    }
+
+    return "";
+
+  } catch (error) {
+    console.error(
+      "AI media processing error:",
+      error.message
+    );
+
+    return "";
+  }
+}
+
+async function sendRelatedProductSuggestions(
+  jid,
+  orderedProduct
+) {
+  try {
+    if (!AI_CROSS_SELL_ENABLED) return;
+
+    const category = String(
+      orderedProduct?.category || ""
+    ).trim();
+
+    if (!category) return;
+
+    const result = await searchProducts(
+      "",
+      1,
+      6,
+      category
+    );
+
+    if (!result || result.success !== true) return;
+
+    const products = getProducts(result)
+      .filter(
+        product =>
+          String(product._id) !==
+          String(orderedProduct._id)
+      )
+      .slice(0, 2);
+
+    if (!products.length) return;
+
+    let message =
+      `🛍️ *YOU MAY ALSO NEED* ☀️\n\n` +
+      `Customers often complete their ${category} setup with these products from our store:\n\n`;
+
+    products.forEach((product, index) => {
+      message +=
+        `${index + 1}. *${product.name}* - ${formatNaira(productPrice(product))}\n`;
+    });
+
+    message +=
+      `\nType MENU to browse more products, or ask me anything about them. 😊`;
+
+    await sendText(jid, message);
+
+    console.log(
+      "Post-order product suggestions sent:",
+      {
+        category,
+        count: products.length
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      "Post-order suggestion error:",
+      error.message
+    );
+  }
+}
+
+const FOLLOW_UP_STAGES = new Set([
+  "search",
+  "select_category",
+  "select_product",
+  "quantity",
+  "full_name",
+  "phone",
+  "address",
+  "city",
+  "state",
+  "zipCode",
+  "order_number",
+  "order_phone"
+]);
+
+const FOLLOW_UP_MESSAGES = {
+  search:
+    "Just checking in 😊 Which product would you like me to look up in our store? You can also type MENU to see all options.",
+  select_category:
+    "Just checking in 😊 Reply with a category number whenever you are ready, or type MENU.",
+  select_product:
+    "Just checking in 😊 Reply with the product number you are interested in whenever you are ready, or type MENU.",
+  quantity:
+    "Just checking in 😊 Reply with the quantity you would like to order whenever you are ready, or type MENU to stop.",
+  full_name:
+    "Just checking in 😊 Reply with your full name whenever you are ready to continue your order.",
+  phone:
+    "Just checking in 😊 Reply with your WhatsApp number whenever you are ready to continue your order.",
+  address:
+    "Just checking in 😊 Reply with your delivery address whenever you are ready to continue your order.",
+  city:
+    "Just checking in 😊 Which city or town should we deliver your order to?",
+  state:
+    "Just checking in 😊 Which state in Nigeria should we deliver your order to?",
+  zipCode:
+    "Just checking in 😊 Reply with your postcode or ZIP code to complete your order.",
+  order_number:
+    "Just checking in 😊 Reply with your order number whenever you are ready, and I will check it for you.",
+  order_phone:
+    "Just checking in 😊 Reply with the phone number used for your order, and I will check the status for you."
+};
+
+const followUpTimers = new Map();
+
+function clearFollowUpTimer(jid) {
+  const timer = followUpTimers.get(jid);
+
+  if (timer) {
+    clearTimeout(timer);
+    followUpTimers.delete(jid);
+  }
+}
+
+function getFollowUpMessage(stage) {
+  return FOLLOW_UP_MESSAGES[stage] || null;
+}
+
+function scheduleFollowUp(jid, stage) {
+  if (!AI_FOLLOW_UP_ENABLED) return;
+
+  if (!FOLLOW_UP_STAGES.has(stage)) return;
+
+  clearFollowUpTimer(jid);
+
+  const timer = setTimeout(async () => {
+    followUpTimers.delete(jid);
+
+    try {
+      if (!isConnected()) return;
+
+      const state = conversations.get(jid) || {};
+
+      if (state.stage !== stage) return;
+
+      const message = getFollowUpMessage(stage);
+
+      if (!message) return;
+
+      console.log(
+        "AI follow-up reminder sent:",
+        { jid, stage }
+      );
+
+      await sendText(jid, message);
+
+    } catch (error) {
+      console.error(
+        "AI follow-up error:",
+        error.message
+      );
+    }
+  }, AI_FOLLOW_UP_DELAY_MS);
+
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+
+  followUpTimers.set(jid, timer);
+}
+
+export function getAIAutomationStatus() {
+  return {
+    voiceTranscription: AI_VOICE_ENABLED,
+    visionEnquiries: AI_VISION_ENABLED,
+    smartSearchCorrection: AI_SMART_SEARCH_ENABLED,
+    aiCategoryMatching: AI_CATEGORY_MATCHING_ENABLED,
+    productAdvisor: AI_PRODUCT_ADVISOR_ENABLED,
+    orderFlowAssistant: AI_ORDER_ASSISTANT_ENABLED,
+    postOrderSuggestions: AI_CROSS_SELL_ENABLED,
+    followUpReminders: AI_FOLLOW_UP_ENABLED,
+    followUpDelayMinutes: Math.round(
+      AI_FOLLOW_UP_DELAY_MS / 60000
+    ),
+    groqModel: GROQ_MODEL,
+    transcriptionModel: GROQ_TRANSCRIBE_MODEL,
+    visionModel: GROQ_VISION_MODEL,
+    activeAIConversations: aiHistory.size,
+    scheduledFollowUps: followUpTimers.size
+  };
 }
 
 // ==========================================
@@ -1869,7 +2918,8 @@ async function showProducts(
   jid,
   search = "",
   page = 1,
-  category = ""
+  category = "",
+  isAIRetry = false
 ) {
   const state = conversations.get(jid) || {};
 
@@ -1918,6 +2968,43 @@ async function showProducts(
     );
 
     if (!products.length) {
+      // AI ENHANCEMENT: one automatic AI-corrected
+      // retry when a search returns no products
+      // (fixes spelling and brand name mistakes)
+
+      if (
+        searchTerm &&
+        !isAIRetry &&
+        AI_SMART_SEARCH_ENABLED
+      ) {
+        const suggestion =
+          await getAISearchSuggestion(searchTerm);
+
+        if (
+          suggestion &&
+          suggestion.toLowerCase() !==
+          searchTerm.toLowerCase()
+        ) {
+          console.log(
+            "AI corrected product search:",
+            {
+              original: searchTerm,
+              corrected: suggestion
+            }
+          );
+
+          await showProducts(
+            jid,
+            suggestion,
+            page,
+            category,
+            true
+          );
+
+          return;
+        }
+      }
+
       state.products = [];
       state.stage = "browse_empty";
 
@@ -2162,6 +3249,14 @@ async function createOrderFromConversation(jid, state) {
 
     await sendText(jid, response);
 
+    // AI ENHANCEMENT: automatic post-order product
+    // suggestions from the live store database
+
+    await sendRelatedProductSuggestions(
+      jid,
+      state.product
+    );
+
     conversations.delete(jid);
     clearAIHistory(jid);
 
@@ -2252,7 +3347,8 @@ async function handleConversation(jid, text) {
 
   if (
     isCustomerServiceRequest(text) ||
-    isOrderPaymentProblem(text)
+    isOrderPaymentProblem(text) ||
+    isFrustratedCustomer(text)
   ) {
     console.log(
       "Customer service escalation requested:",
@@ -2261,11 +3357,20 @@ async function handleConversation(jid, text) {
 
     conversations.delete(jid);
 
+    let escalationIntro =
+      "Certainly! You can contact our customer service team directly using the details below.";
+
+    if (isOrderPaymentProblem(text)) {
+      escalationIntro =
+        "I'm sorry you're experiencing this problem. Our customer service team can help you resolve it.";
+    } else if (isFrustratedCustomer(text)) {
+      escalationIntro =
+        "I'm truly sorry about your experience. Our customer service team will attend to you immediately.";
+    }
+
     await sendCustomerServiceDetails(
       jid,
-      isOrderPaymentProblem(text)
-        ? "I'm sorry you're experiencing this problem. Our customer service team can help you resolve it."
-        : "Certainly! You can contact our customer service team directly using the details below."
+      escalationIntro
     );
 
     return;
@@ -2331,6 +3436,40 @@ async function handleConversation(jid, text) {
       );
 
       return;
+    }
+
+    // AI ENHANCEMENT: smart category matching when
+    // the customer types a category in their own words
+
+    if (
+      AI_CATEGORY_MATCHING_ENABLED &&
+      state.categories &&
+      state.categories.length &&
+      text.trim().length >= 2 &&
+      !/^\d+$/.test(text.trim())
+    ) {
+      const aiCategory = await matchCategoryWithAI(
+        text,
+        state.categories
+      );
+
+      if (aiCategory) {
+        console.log(
+          "AI category match:",
+          text,
+          "->",
+          aiCategory
+        );
+
+        await showProducts(
+          jid,
+          "",
+          1,
+          aiCategory
+        );
+
+        return;
+      }
     }
 
     if (text.trim().length >= 2) {
@@ -2413,6 +3552,19 @@ async function handleConversation(jid, text) {
         return;
       }
 
+      // AI ENHANCEMENT: grounded product advice
+      // based only on the live product list
+
+      if (
+        await answerProductListQuestion(
+          jid,
+          text,
+          state.products
+        )
+      ) {
+        return;
+      }
+
       await sendText(
         jid,
         "Please enter a valid product number. You can also type NEXT, PREV, a new product name, or MENU."
@@ -2485,7 +3637,19 @@ async function handleConversation(jid, text) {
   // QUANTITY
 
   if (state.stage === "quantity") {
-    const quantity = Number(text);
+    let quantity = Number(text);
+
+    // AI ENHANCEMENT: understand natural language
+    // quantities like "two" or "3 pieces"
+
+    if (!Number.isInteger(quantity)) {
+      const parsedQuantity =
+        await parseQuantityWithAI(text);
+
+      if (parsedQuantity !== null) {
+        quantity = parsedQuantity;
+      }
+    }
 
     if (
       !Number.isInteger(quantity) ||
@@ -2493,6 +3657,25 @@ async function handleConversation(jid, text) {
       quantity > 100 ||
       quantity > Number(state.product.countInStock || 0)
     ) {
+      // AI ENHANCEMENT: answer mid-order questions
+      // without losing the customer's order state
+
+      if (
+        await handleOrderFlowQuestion(
+          jid,
+          text,
+          "quantity",
+          state
+        )
+      ) {
+        await sendText(
+          jid,
+          `How many *${state.product.name}* would you like? Available stock: ${state.product.countInStock}.`
+        );
+
+        return;
+      }
+
       await sendText(
         jid,
         `Enter a valid quantity. Available stock: ${state.product.countInStock}.`
@@ -2513,6 +3696,21 @@ async function handleConversation(jid, text) {
   // CUSTOMER NAME
 
   if (state.stage === "full_name") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "full_name",
+        state
+      )
+    ) {
+      await sendText(jid, "Please enter your full name.");
+      return;
+    }
+
     if (text.length < 3 || text.length > 100) {
       await sendText(jid, "Please enter your full name.");
       return;
@@ -2535,6 +3733,26 @@ async function handleConversation(jid, text) {
   // CUSTOMER PHONE
 
   if (state.stage === "phone") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "phone",
+        state
+      )
+    ) {
+      await sendText(
+        jid,
+        "Enter your delivery phone number.\n\n" +
+        "For security, it must be the same number you are using to chat with us on WhatsApp."
+      );
+
+      return;
+    }
+
     const phone = normalizePhone(text);
     const whatsappPhone = getWhatsAppPhone(jid);
 
@@ -2568,6 +3786,25 @@ async function handleConversation(jid, text) {
   // DELIVERY ADDRESS
 
   if (state.stage === "address") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "address",
+        state
+      )
+    ) {
+      await sendText(
+        jid,
+        "Enter your delivery street or house address."
+      );
+
+      return;
+    }
+
     if (text.length < 5) {
       await sendText(
         jid,
@@ -2589,6 +3826,21 @@ async function handleConversation(jid, text) {
   // CITY
 
   if (state.stage === "city") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "city",
+        state
+      )
+    ) {
+      await sendText(jid, "Which city or town?");
+      return;
+    }
+
     if (text.length < 2 || text.length > 100) {
       await sendText(jid, "Please enter a valid city or town.");
       return;
@@ -2606,6 +3858,21 @@ async function handleConversation(jid, text) {
   // STATE
 
   if (state.stage === "state") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "state",
+        state
+      )
+    ) {
+      await sendText(jid, "Which state in Nigeria?");
+      return;
+    }
+
     if (text.length < 2 || text.length > 100) {
       await sendText(jid, "Please enter a valid state.");
       return;
@@ -2627,6 +3894,25 @@ async function handleConversation(jid, text) {
   // POSTCODE AND ORDER SUBMISSION
 
   if (state.stage === "zipCode") {
+    // AI ENHANCEMENT: answer mid-order questions
+    // without losing the customer's order state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "zipCode",
+        state
+      )
+    ) {
+      await sendText(
+        jid,
+        "Please enter your delivery postcode or ZIP code."
+      );
+
+      return;
+    }
+
     if (
       text.trim().length < 2 ||
       text.trim().length > 20
@@ -2655,6 +3941,21 @@ async function handleConversation(jid, text) {
   // ORDER NUMBER
 
   if (state.stage === "order_number") {
+    // AI ENHANCEMENT: answer tracking questions
+    // without losing the tracking state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "order_number",
+        state
+      )
+    ) {
+      await sendText(jid, "Please enter your order number.");
+      return;
+    }
+
     if (text.trim().length < 2) {
       await sendText(jid, "Please enter a valid order number.");
       return;
@@ -2676,6 +3977,25 @@ async function handleConversation(jid, text) {
   // ORDER TRACKING
 
   if (state.stage === "order_phone") {
+    // AI ENHANCEMENT: answer tracking questions
+    // without losing the tracking state
+
+    if (
+      await handleOrderFlowQuestion(
+        jid,
+        text,
+        "order_phone",
+        state
+      )
+    ) {
+      await sendText(
+        jid,
+        "Enter the phone number used when placing your order."
+      );
+
+      return;
+    }
+
     try {
       const phone = normalizePhone(text);
 
@@ -3219,7 +4539,18 @@ export async function startWhatsApp() {
               continue;
             }
 
-            const text = getText(message);
+            let text = getText(message);
+
+            // AI ENHANCEMENT: automatic voice note
+            // transcription and image recognition when
+            // the message has no text
+
+            if (!text) {
+              text = await extractTextFromMedia(
+                message,
+                jid
+              );
+            }
 
             if (!text) continue;
             if (!isConnected()) continue;
@@ -3237,6 +4568,11 @@ export async function startWhatsApp() {
               try {
                 if (!isConnected()) return;
 
+                // AI ENHANCEMENT: cancel any pending
+                // follow-up reminder for this customer
+
+                clearFollowUpTimer(jid);
+
                 const firstWelcome =
                   await sendFounderWelcome(jid);
 
@@ -3248,6 +4584,20 @@ export async function startWhatsApp() {
                 }
 
                 await handleConversation(jid, text);
+
+                // AI ENHANCEMENT: schedule an automatic
+                // follow-up reminder if the conversation
+                // is waiting for customer input
+
+                const followUpState =
+                  conversations.get(jid) || {};
+
+                if (followUpState.stage) {
+                  scheduleFollowUp(
+                    jid,
+                    followUpState.stage
+                  );
+                }
 
               } catch (error) {
                 console.error(
