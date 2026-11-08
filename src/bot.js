@@ -115,80 +115,97 @@ function saveAIHistory(jid, question, answer) {
 
 function getAISystemPrompt() {
   return `
-You are the official AI customer service assistant
+You are the intelligent customer service assistant
 for ${STORE_NAME}, a solar energy and electrical
 products business in Nigeria.
 
 PERSONALITY:
 - Friendly, intelligent and professional.
-- Natural, conversational, warm and patient.
+- Natural and conversational.
 - Understand Nigerian English and informal expressions.
-- Avoid robotic or repetitive responses.
-- Keep responses concise unless details are needed.
+- Be patient and helpful.
+- Do not sound like a robot.
+- Do not repeat the same greeting unnecessarily.
 
-BUSINESS RESPONSIBILITIES:
-Help customers with enquiries about the business,
-its services, solar technology, electrical systems,
-installations and general technical questions.
+YOUR RESPONSIBILITIES:
 
-LIVE PRODUCT INFORMATION:
-The actual product catalogue is stored in the
-ecommerce database.
+1. CUSTOMER SERVICE
+Answer customer questions about the store, products,
+solar energy, electrical systems, installations,
+renewable energy and related topics.
 
-Product names, descriptions, prices, discounts,
-categories, brands, SKUs and stock quantities must
-come from the live ecommerce product API.
+2. PRODUCT ENQUIRIES
+Help customers explain what they need.
 
-You must never invent product names.
+If a customer says:
+"I need something for my house"
 
-You must never guess product prices or availability.
+Ask what appliances they want to power.
 
-You must never claim that a product exists unless
-it has been returned by the product API.
+If a customer says:
+"I need a solar system"
 
-You must never claim that you checked inventory
-unless the application actually called the product API.
+Ask about their appliances, power requirements,
+backup duration and budget.
 
-If a customer asks about a product, the application
-will search the actual ecommerce database.
+If a customer gives technical requirements,
+help identify the type of products they may need.
 
-If the live product information is unavailable,
-explain that you cannot check it at the moment.
+3. LIVE PRODUCT DATABASE
 
-TECHNICAL GUIDANCE:
-Explain technical subjects in simple language.
+The application has access to the real store catalogue.
 
-When calculating solar requirements, ask for:
-- Appliances they want to power.
-- Power ratings in watts.
-- Hours of usage.
-- Required backup duration.
-- Available budget, when relevant.
+Product names, prices, discounts, brands, descriptions,
+categories, SKUs and stock quantities must come from
+the actual ecommerce database.
+
+Never invent products.
+
+Never invent prices.
+
+Never claim a product is available unless the application
+has checked the actual product API.
+
+Never pretend that you have checked the database.
+
+If the customer asks for a product, the application
+will search the actual product API.
+
+4. TECHNICAL QUESTIONS
+
+Explain solar panels, batteries, inverters, charge
+controllers, wiring, electrical protection, installations
+and solar calculations in understandable language.
+
+Ask for missing information when calculations require it.
 
 Do not present estimates as guaranteed specifications.
 
-PURCHASES:
-When customers want to purchase products, guide them
-through the automated product ordering process.
+5. ORDERING
 
-ORDER TRACKING:
-When customers want to track an order, guide them
-through the order tracking process.
+When a customer wants to purchase a product,
+guide them through the automated ordering process.
 
-BUSINESS RULES:
-- Never invent prices.
-- Never invent product availability.
-- Never invent discounts.
-- Never invent delivery fees.
-- Never claim payment has been received without confirmation.
-- Never claim an order has been created without API confirmation.
-- Never request passwords, OTPs or card details.
-- Never expose private payment information.
+6. ORDER TRACKING
 
-WHATSAPP FORMATTING:
-- Use short paragraphs.
-- Use emojis naturally without overusing them.
-- Avoid unnecessary technical language.
+When a customer wants to track an order,
+guide them through order tracking.
+
+7. SECURITY
+
+Never request passwords, payment card details or
+private OTPs.
+
+Never claim that payment has been received unless
+the payment system confirms it.
+
+Never claim an order was created without API confirmation.
+
+Never invent delivery fees or delivery dates.
+
+WHATSAPP STYLE:
+Use short paragraphs, clear explanations and natural
+emojis where appropriate.
 
 You represent ${STORE_NAME}.
 `;
@@ -247,202 +264,128 @@ async function askCustomerAI(jid, question) {
 }
 
 // ==========================================
-// MESSAGE INTENT DETECTION
+// MESSAGE NORMALIZATION
 // ==========================================
 
-function fallbackIntent(message) {
-  const text = String(message || "").toLowerCase().trim();
-
-  if (
-    /^(hi|hello|hey|hey there|good morning|good afternoon|good evening|how far|how are you)[!. ]*$/.test(text)
-  ) {
-    return "GREETING";
-  }
-
-  if (
-    /\b(track|tracking|order status|where is my order)\b/i.test(text)
-  ) {
-    return "TRACKING";
-  }
-
-  if (
-    /\b(customer support|speak to someone|human agent|representative|complaint)\b/i.test(text)
-  ) {
-    return "SUPPORT";
-  }
-
-  if (
-    /\b(buy|purchase|order|checkout|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|browse products|list products)\b/i.test(text)
-  ) {
-    return "PRODUCT";
-  }
-
-  return "QUESTION";
-}
-
-async function detectMessageIntent(message) {
-  try {
-    const client = getGroqClient();
-
-    const completion =
-      await client.chat.completions.create({
-        model: GROQ_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: `
-You are a message intent classifier for ${STORE_NAME}.
-
-Classify the customer's message into exactly one:
-
-GREETING
-MENU
-PRODUCT
-TRACKING
-SUPPORT
-QUESTION
-
-GREETING:
-Greetings and casual acknowledgements.
-
-MENU:
-The customer wants the main menu.
-
-PRODUCT:
-The customer wants to find, search, browse, buy,
-purchase, compare or check the price or availability
-of an item in the store.
-
-TRACKING:
-The customer wants to track an existing order.
-
-SUPPORT:
-The customer wants human assistance.
-
-QUESTION:
-General technical questions and other enquiries.
-
-IMPORTANT EXAMPLES:
-
-"Hi" = GREETING
-"Okay" = GREETING
-"Thanks" = GREETING
-"What products do you have?" = PRODUCT
-"How much is this?" = PRODUCT
-"Solar Panels" = PRODUCT
-"Show me batteries" = PRODUCT
-"How does a solar panel work?" = QUESTION
-"How does an inverter work?" = QUESTION
-"Track my order" = TRACKING
-
-Return ONLY one category name.
-`
-          },
-          {
-            role: "user",
-            content: String(message).slice(
-              0,
-              MAX_MESSAGE_LENGTH
-            )
-          }
-        ],
-        temperature: 0,
-        max_tokens: 20
-      });
-
-    const intent =
-      completion.choices?.[0]?.message?.content
-        ?.trim()
-        .toUpperCase()
-        .replace(/[^A-Z_]/g, "");
-
-    const allowed = [
-      "GREETING",
-      "MENU",
-      "PRODUCT",
-      "TRACKING",
-      "SUPPORT",
-      "QUESTION"
-    ];
-
-    return allowed.includes(intent)
-      ? intent
-      : fallbackIntent(message);
-
-  } catch (error) {
-    console.error(
-      "AI intent detection error:",
-      error.message
-    );
-
-    return fallbackIntent(message);
-  }
-}
-
-// ==========================================
-// DIRECT PRODUCT ROUTING
-// ==========================================
-
-function isCatalogBrowseRequest(message) {
-  const text = String(message || "")
+function normalizeMessage(message) {
+  return String(message || "")
     .toLowerCase()
-    .trim()
     .replace(/[?!.,]+/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ==========================================
+// CATEGORY BROWSING DETECTION
+// IMPORTANT: RUN BEFORE PRODUCT SEARCH
+// ==========================================
+
+function isCategoryBrowseRequest(message) {
+  const text = normalizeMessage(message);
 
   const patterns = [
-    /\b(show|display|list|view|see|browse)\b.{0,50}\b(all|every)\b.{0,25}\bproducts?\b/,
-
-    /\b(all|every)\s+(the\s+)?products?\b/,
-
-    /\b(i want|i need|i would like|i'd like|let me)\b.{0,40}\b(see|view|browse|check)\b.{0,25}\bproducts?\b/,
-
-    /\b(what|which)\s+products?\b.{0,35}\b(have|available|sell|offer)\b/,
-
-    /\b(browse|view|see|show|list)\b.{0,25}\b(product\s+)?catalog(ue)?\b/,
-
-    /\b(your|the|all)\s+(product\s+)?catalog(ue)?\b/,
-
-    /\b(what products do you have|what do you have in store|what products are available|all products|browse all products|view all products|show all products|list all products)\b/
+    /\bthe products? in (this|your|the) store\b/,
+    /\bproducts? in (this|your|the) store\b/,
+    /\bproducts? available in (this|your|the) store\b/,
+    /\bwhat products? do you have\b/,
+    /\bwhat products? are available\b/,
+    /\bwhat items? do you sell\b/,
+    /\bwhat do you sell\b/,
+    /\bwhat do you offer\b/,
+    /\bwhat can i buy (here|from you|in this store)\b/,
+    /\bshow me (all |every )?(your )?categories\b/,
+    /\bshow (all |every )?(the )?(product )?categories\b/,
+    /\blist (all |every )?(the )?(product )?categories\b/,
+    /\bdisplay (all |every )?(the )?(product )?categories\b/,
+    /\bwhat categories do you have\b/,
+    /\bwhich categories do you have\b/,
+    /\ball product categories\b/,
+    /\bevery product category\b/,
+    /\bproduct categories\b/,
+    /\bbrowse by categor(y|ies)\b/,
+    /\bcategory list\b/,
+    /\bavailable categories\b/,
+    /\btypes of products (available|do you have)\b/,
+    /\bwhat types of products\b/,
+    /\bi want to explore your products\b/,
+    /\bi want to browse your products\b/
   ];
 
   return patterns.some(pattern => pattern.test(text));
 }
 
+// ==========================================
+// FULL PRODUCT CATALOGUE DETECTION
+// ==========================================
+
+function isCatalogBrowseRequest(message) {
+  const text = normalizeMessage(message);
+
+  const patterns = [
+    /\bshow (me )?(all|every) (the )?products\b/,
+    /\blist (all|every) (the )?products\b/,
+    /\bdisplay (all|every) (the )?products\b/,
+    /\bview (all|every) (the )?products\b/,
+    /\bsee (all|every) (the )?products\b/,
+    /\bbrowse (all|every) (the )?products\b/,
+    /\ball products\b/,
+    /\bevery product\b/,
+    /\bfull product catalog(ue)?\b/,
+    /\bproduct catalog(ue)\b/,
+    /\bshow me everything\b/,
+    /\bshow everything in the store\b/,
+    /\bi want to see all products\b/
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
+}
+
+// ==========================================
+// GREETING DETECTION
+// ==========================================
+
+function isGreetingOrAcknowledgement(message) {
+  const text = normalizeMessage(message);
+
+  return /^(hi|hello|hey|hey there|hi there|hello there|good morning|good afternoon|good evening|how far|how are you|what is up|whats up|okay|ok|alright|all right|yes|no|sure|thanks|thank you|thank you so much|thanks a lot|cool|nice|great|good|fine|understood|i understand|no problem|perfect)$/.test(text);
+}
+
+// ==========================================
+// TECHNICAL QUESTION DETECTION
+// ==========================================
+
+function isTechnicalQuestion(message) {
+  return /^(how does|how do|why does|why do|what is|what are|explain|tell me about|can you explain|what causes|what happens when|difference between|what is the difference between)\b/i.test(
+    String(message || "").trim()
+  );
+}
+
+// ==========================================
+// EXPLICIT PRODUCT SEARCH DETECTION
+// ==========================================
+
 function isExplicitProductRequest(message) {
-  const text = String(message || "").toLowerCase().trim();
+  const text = String(message || "").trim();
+
+  if (isCategoryBrowseRequest(text)) return false;
+  if (isCatalogBrowseRequest(text)) return false;
 
   return /\b(do you have|have you got|do you sell|i want to buy|i want|i need|looking for|show me|find me|search for|how much is|how much does|what is the price|what's the price|price of|available for sale|in stock|buy|purchase|order|product price|check availability)\b/i.test(text);
 }
 
-function isGreetingOrAcknowledgement(message) {
-  const text = String(message || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[!.?,]+$/g, "")
-    .replace(/\s+/g, " ");
-
-  return /^(hi|hello|hey|hey there|hi there|hello there|good morning|good afternoon|good evening|how far|how are you|what's up|whats up|okay|ok|alright|all right|yes|no|sure|thanks|thank you|thank you so much|thanks a lot|cool|nice|great|good|fine|understood|i understand|no problem|perfect)$/.test(text);
-}
-
-function isTechnicalQuestion(message) {
-  const text = String(message || "").trim();
-
-  return /^(how does|how do|why does|why do|what is|what are|explain|tell me about|can you explain|what causes|what happens when|difference between)\b/i.test(text);
-}
+// ==========================================
+// SIMPLE PRODUCT SEARCH DETECTION
+// ==========================================
 
 function shouldTryCatalogSearch(message) {
   const text = String(message || "").trim();
 
   if (!text) return false;
 
-  if (isGreetingOrAcknowledgement(text)) {
-    return false;
-  }
-
-  if (isTechnicalQuestion(text)) {
-    return false;
-  }
+  if (isCategoryBrowseRequest(text)) return false;
+  if (isCatalogBrowseRequest(text)) return false;
+  if (isGreetingOrAcknowledgement(text)) return false;
+  if (isTechnicalQuestion(text)) return false;
 
   const words = text.split(/\s+/).filter(Boolean);
 
@@ -454,13 +397,16 @@ function shouldTryCatalogSearch(message) {
 }
 
 // ==========================================
-// EXTRACT SEARCH TERM
+// EXTRACT PRODUCT SEARCH TERM
 // ==========================================
 
 function extractProductSearchTerm(message = "") {
   let search = String(message || "").trim();
 
-  if (isCatalogBrowseRequest(search)) {
+  if (
+    isCategoryBrowseRequest(search) ||
+    isCatalogBrowseRequest(search)
+  ) {
     return "";
   }
 
@@ -484,12 +430,163 @@ function extractProductSearchTerm(message = "") {
     search = search.replace(prefix, "");
   }
 
-  search = search
+  return search
     .replace(/[?!]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
 
-  return search;
+// ==========================================
+// AI INTENT CLASSIFICATION
+// ==========================================
+
+function fallbackIntent(message) {
+  const text = normalizeMessage(message);
+
+  if (isCategoryBrowseRequest(text)) return "CATEGORY";
+  if (isCatalogBrowseRequest(text)) return "CATALOG";
+
+  if (isGreetingOrAcknowledgement(text)) {
+    return "GREETING";
+  }
+
+  if (
+    /\b(track|tracking|order status|where is my order|my order|check my order)\b/i.test(text)
+  ) {
+    return "TRACKING";
+  }
+
+  if (
+    /\b(customer support|speak to someone|human agent|representative|complaint|talk to a person)\b/i.test(text)
+  ) {
+    return "SUPPORT";
+  }
+
+  if (isExplicitProductRequest(text)) {
+    return "PRODUCT";
+  }
+
+  if (shouldTryCatalogSearch(text)) {
+    return "PRODUCT";
+  }
+
+  return "QUESTION";
+}
+
+async function detectMessageIntent(message) {
+  try {
+    const client = getGroqClient();
+
+    const completion =
+      await client.chat.completions.create({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `
+You are an intent classifier for ${STORE_NAME}.
+
+Return exactly one of these labels:
+
+GREETING
+CATEGORY
+CATALOG
+PRODUCT
+TRACKING
+SUPPORT
+QUESTION
+
+CATEGORY:
+The customer wants to see the store's product categories.
+
+Examples:
+"The products in this store"
+"What do you sell?"
+"What categories do you have?"
+"Show me all categories"
+"List your product categories"
+"What products are available in your store?"
+
+CATALOG:
+The customer explicitly wants to see all actual products.
+
+Examples:
+"Show me all products"
+"List every product"
+"Browse the full catalogue"
+
+PRODUCT:
+The customer wants to search for, buy, compare or
+check the price or availability of a specific product.
+
+Examples:
+"Do you have Jinko?"
+"I need a 5kVA inverter"
+"How much is a solar panel?"
+"Show me batteries"
+
+TRACKING:
+The customer wants to track an existing order.
+
+SUPPORT:
+The customer wants human assistance.
+
+GREETING:
+Greetings and simple acknowledgements.
+
+QUESTION:
+Technical questions, general enquiries, vague requests
+and anything that does not fit the other categories.
+
+IMPORTANT:
+A technical question about how a product works is
+QUESTION, not PRODUCT.
+
+"The products in this store" is CATEGORY, not PRODUCT.
+
+Return only the label.
+`
+          },
+          {
+            role: "user",
+            content: String(message).slice(
+              0,
+              MAX_MESSAGE_LENGTH
+            )
+          }
+        ],
+        temperature: 0,
+        max_tokens: 20
+      });
+
+    const intent =
+      completion.choices?.[0]?.message?.content
+        ?.trim()
+        .toUpperCase()
+        .replace(/[^A-Z_]/g, "");
+
+    const allowed = [
+      "GREETING",
+      "CATEGORY",
+      "CATALOG",
+      "PRODUCT",
+      "TRACKING",
+      "SUPPORT",
+      "QUESTION"
+    ];
+
+    return allowed.includes(intent)
+      ? intent
+      : fallbackIntent(message);
+
+  } catch (error) {
+    console.error(
+      "AI intent detection error:",
+      error.message
+    );
+
+    return fallbackIntent(message);
+  }
 }
 
 // ==========================================
@@ -626,9 +723,7 @@ async function sendTextNow(jid, message) {
 
   try {
     await sock.sendPresenceUpdate("composing", jid);
-  } catch (error) {
-    // Typing indicator is optional.
-  }
+  } catch (error) {}
 
   await sleep(getTypingDuration(text));
 
@@ -644,9 +739,7 @@ async function sendTextNow(jid, message) {
       if (sock) {
         await sock.sendPresenceUpdate("paused", jid);
       }
-    } catch (error) {
-      // Ignore presence update errors.
-    }
+    } catch (error) {}
   }
 }
 
@@ -680,9 +773,7 @@ function sendDocument(jid, document) {
 
       try {
         await sock.sendPresenceUpdate("composing", jid);
-      } catch (error) {
-        // Continue if presence is unavailable.
-      }
+      } catch (error) {}
 
       await sleep(1000);
 
@@ -913,6 +1004,8 @@ function getProducts(data) {
   );
 }
 
+// Supports categories returned as strings or objects.
+// Category names still come exclusively from the API.
 function getCategoriesList(data) {
   if (
     !data ||
@@ -927,13 +1020,29 @@ function getCategoriesList(data) {
     return [];
   }
 
+  const names = data.categories
+    .map(item => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+
+      if (item && typeof item === "object") {
+        return String(
+          item.name ||
+          item.category ||
+          item.title ||
+          ""
+        ).trim();
+      }
+
+      return "";
+    })
+    .filter(Boolean);
+
   return [
-    ...new Set(
-      data.categories
-        .filter(item => typeof item === "string")
-        .map(item => item.trim())
-        .filter(Boolean)
-    )
+    ...new Map(
+      names.map(name => [name.toLowerCase(), name])
+    ).values()
   ];
 }
 
@@ -949,6 +1058,86 @@ function productOriginalPrice(product) {
   return Number.isFinite(originalPrice)
     ? originalPrice
     : productPrice(product);
+}
+
+// ==========================================
+// BROWSE CATEGORIES FROM MONGODB
+// ==========================================
+
+async function showCategories(jid) {
+  const state = conversations.get(jid) || {};
+
+  state.stage = "loading_categories";
+  state.categories = [];
+
+  conversations.set(jid, state);
+
+  try {
+    console.log("Fetching ALL categories from MongoDB API.");
+
+    const result = await getCategories();
+
+    if (!result || result.success !== true) {
+      throw new Error(
+        result?.message || "Category API request failed."
+      );
+    }
+
+    const categories = getCategoriesList(result);
+
+    console.log(
+      "Categories received from database:",
+      categories
+    );
+
+    if (!categories.length) {
+      state.stage = "browse_empty";
+      state.categories = [];
+
+      conversations.set(jid, state);
+
+      await sendText(
+        jid,
+        "I checked our store database, but there are currently no active product categories available. Please try browsing again later."
+      );
+
+      return;
+    }
+
+    state.categories = categories;
+    state.stage = "select_category";
+
+    conversations.set(jid, state);
+
+    let response =
+      `*${STORE_NAME} - ALL PRODUCT CATEGORIES* ☀️\n\n` +
+      "Here are the product categories currently available in our store:\n\n";
+
+    categories.forEach((category, index) => {
+      response += `${index + 1}. ${category}\n`;
+    });
+
+    response +=
+      "\nReply with a category number to view its products.\n\n" +
+      "You can also type a category name directly.\n" +
+      "Type *ALL PRODUCTS* to view the complete catalogue.\n" +
+      "Type *MENU* to return to the main menu.";
+
+    await sendText(jid, response);
+
+  } catch (error) {
+    console.error("Category retrieval error:", error.message);
+
+    state.stage = "browse_empty";
+    state.categories = [];
+
+    conversations.set(jid, state);
+
+    await sendText(
+      jid,
+      "Sorry, I couldn't retrieve product categories from our store database right now. Please try again shortly."
+    );
+  }
 }
 
 // ==========================================
@@ -1013,14 +1202,28 @@ async function showProducts(
 
       conversations.set(jid, state);
 
-      await sendText(
-        jid,
-        searchTerm
-          ? `I couldn't find "${searchTerm}" in our product database. Please try another search term or browse our categories.`
-          : category
-            ? `There are currently no active products listed under *${category}*.`
-            : "There are currently no active products available in our store."
-      );
+      if (category) {
+        await sendText(
+          jid,
+          `There are currently no active products listed under *${category}*.\n\nI'll show you the other available categories.`
+        );
+
+      } else if (searchTerm) {
+        await sendText(
+          jid,
+          `I couldn't find a matching product for "${searchTerm}" in our database. 😊\n\nLet me show you the available product categories so you can choose what you're looking for.`
+        );
+
+      } else {
+        await sendText(
+          jid,
+          "There are currently no active products available in our store."
+        );
+      }
+
+      if (searchTerm || category) {
+        await showCategories(jid);
+      }
 
       return;
     }
@@ -1125,84 +1328,6 @@ async function showProducts(
 }
 
 // ==========================================
-// BROWSE CATEGORIES FROM MONGODB
-// ==========================================
-
-async function showCategories(jid) {
-  const state = conversations.get(jid) || {};
-
-  state.stage = "loading_categories";
-  state.categories = [];
-
-  conversations.set(jid, state);
-
-  try {
-    console.log("Fetching categories from ecommerce backend.");
-
-    const result = await getCategories();
-
-    if (!result || result.success !== true) {
-      throw new Error(
-        result?.message || "Category API request failed."
-      );
-    }
-
-    const categories = getCategoriesList(result);
-
-    console.log(
-      "MongoDB categories returned:",
-      categories
-    );
-
-    if (!categories.length) {
-      state.stage = "browse_empty";
-      state.categories = [];
-
-      conversations.set(jid, state);
-
-      await sendText(
-        jid,
-        "There are currently no active product categories available. You can browse all products from the main menu."
-      );
-
-      return;
-    }
-
-    state.categories = categories;
-    state.stage = "select_category";
-
-    conversations.set(jid, state);
-
-    let response =
-      `*${STORE_NAME} - PRODUCT CATEGORIES* ☀️\n\n` +
-      "Choose a category:\n\n";
-
-    categories.forEach((category, index) => {
-      response += `${index + 1}. ${category}\n`;
-    });
-
-    response +=
-      "\nReply with the category number to view its products.\n\n" +
-      "Type MENU to return to the main menu.";
-
-    await sendText(jid, response);
-
-  } catch (error) {
-    console.error("Category retrieval error:", error.message);
-
-    state.stage = "browse_empty";
-    state.categories = [];
-
-    conversations.set(jid, state);
-
-    await sendText(
-      jid,
-      "Sorry, I couldn't retrieve product categories from our store database right now. Please try again shortly."
-    );
-  }
-}
-
-// ==========================================
 // GET FRESH PRODUCT DETAILS
 // ==========================================
 
@@ -1285,8 +1410,7 @@ async function createOrderFromConversation(jid, state) {
 
     const totalAmount = Number(order.totalAmount || 0);
 
-    await sendText(
-      jid,
+    let response =
       `*${STORE_NAME} - ORDER CREATED* ☀️\n\n` +
       `Your order has been successfully recorded.\n\n` +
       `Order Number: *${order.orderNumber || "Pending"}*\n` +
@@ -1294,11 +1418,28 @@ async function createOrderFromConversation(jid, state) {
       `Quantity: ${state.quantity}\n` +
       `Total: ${formatNaira(totalAmount)}\n` +
       `Order Status: ${order.status || "pending"}\n` +
-      `Payment Status: ${order.paymentStatus || "pending"}\n\n` +
-      `Your order is currently awaiting payment. ` +
+      `Payment Status: ${order.paymentStatus || "pending"}\n\n`;
+
+    const paymentUrl =
+      order.paymentUrl ||
+      order.paymentLink ||
+      order.checkoutUrl ||
+      result.paymentUrl ||
+      result.paymentLink;
+
+    if (paymentUrl) {
+      response +=
+        `Complete your payment using this secure payment link:\n${paymentUrl}\n\n`;
+    } else {
+      response +=
+        "Your order is awaiting payment instructions from our store.\n\n";
+    }
+
+    response +=
       `Please keep your order number for reference.\n\n` +
-      `Thank you for choosing ${STORE_NAME}.`
-    );
+      `Thank you for choosing ${STORE_NAME}.`;
+
+    await sendText(jid, response);
 
     conversations.delete(jid);
     clearAIHistory(jid);
@@ -1327,11 +1468,13 @@ async function showMainMenu(jid) {
     `How can we assist you today?\n\n` +
     `1️⃣ Search for a product\n` +
     `2️⃣ Browse all products\n` +
-    `3️⃣ Browse by category\n` +
+    `3️⃣ Browse product categories\n` +
     `4️⃣ Track an order\n` +
     `5️⃣ Customer support\n\n` +
-    `You can also ask questions about our products, ` +
-    `solar energy, electrical systems and installations.\n\n` +
+    `You can also ask questions about solar energy, ` +
+    `electrical systems, installations and our products.\n\n` +
+    `You can type your request naturally. For example:\n` +
+    `"I need a solar system for my house."\n\n` +
     `We're happy to help! 😊`
   );
 }
@@ -1341,9 +1484,7 @@ async function showMainMenu(jid) {
 // ==========================================
 
 async function handleConversation(jid, text) {
-  const normalized = String(text || "")
-    .toLowerCase()
-    .trim();
+  const normalized = normalizeMessage(text);
 
   let state = conversations.get(jid) || {};
 
@@ -1378,6 +1519,30 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
+  // GLOBAL CATEGORY REQUEST
+  // MUST RUN BEFORE PRODUCT SEARCH AND
+  // BEFORE CONVERSATION STAGE HANDLING
+  // ========================================
+
+  if (isCategoryBrowseRequest(text)) {
+    console.log("Customer requested database categories:", text);
+
+    await showCategories(jid);
+    return;
+  }
+
+  // ========================================
+  // GLOBAL FULL CATALOGUE REQUEST
+  // ========================================
+
+  if (isCatalogBrowseRequest(text)) {
+    console.log("Customer requested complete catalogue:", text);
+
+    await showProducts(jid, "");
+    return;
+  }
+
+  // ========================================
   // CATEGORY SELECTION
   // ========================================
 
@@ -1385,25 +1550,52 @@ async function handleConversation(jid, text) {
     const index = Number(text) - 1;
 
     if (
-      !Number.isInteger(index) ||
-      index < 0 ||
-      index >= state.categories.length
+      Number.isInteger(index) &&
+      index >= 0 &&
+      index < state.categories.length
     ) {
-      await sendText(
+      const selectedCategory = state.categories[index];
+
+      await showProducts(
         jid,
-        "Please enter a valid category number from the list, or type MENU."
+        "",
+        1,
+        selectedCategory
       );
 
       return;
     }
 
-    const selectedCategory = state.categories[index];
+    const selectedByName = state.categories.find(
+      category =>
+        category.toLowerCase() === normalized
+    );
 
-    await showProducts(
+    if (selectedByName) {
+      await showProducts(
+        jid,
+        "",
+        1,
+        selectedByName
+      );
+
+      return;
+    }
+
+    // Allow customer to search for a different product
+    // instead of forcing a category number.
+    if (text.trim().length >= 2) {
+      await showProducts(
+        jid,
+        extractProductSearchTerm(text) || text
+      );
+
+      return;
+    }
+
+    await sendText(
       jid,
-      "",
-      1,
-      selectedCategory
+      "Please enter a valid category number or category name. You can also type ALL PRODUCTS or MENU."
     );
 
     return;
@@ -1465,9 +1657,19 @@ async function handleConversation(jid, text) {
       index < 0 ||
       index >= state.products.length
     ) {
+      // Allow a new product search while browsing.
+      if (isExplicitProductRequest(text)) {
+        await showProducts(
+          jid,
+          extractProductSearchTerm(text)
+        );
+
+        return;
+      }
+
       await sendText(
         jid,
-        "Please enter a valid product number. You can also type NEXT, PREV or MENU."
+        "Please enter a valid product number. You can also type NEXT, PREV, a new product name, or MENU."
       );
 
       return;
@@ -1817,10 +2019,12 @@ async function handleConversation(jid, text) {
   // ========================================
 
   if (state.stage === "support") {
-    await sendText(
+    const aiResponse = await askCustomerAI(
       jid,
-      "Thank you for contacting Divine Solar Hub. Your message has been received. Please contact our sales representative for further assistance."
+      `The customer needs support. Their message is: ${text}`
     );
+
+    await sendText(jid, aiResponse);
 
     conversations.delete(jid);
     return;
@@ -1873,29 +2077,23 @@ async function handleConversation(jid, text) {
 
     await sendText(
       jid,
-      "Please describe what you need. Our sales representative will assist you."
+      "Please describe what you need. Our assistant will help you."
     );
 
     return;
   }
 
   // ========================================
-  // DIRECT DATABASE PRODUCT ROUTING
+  // DIRECT PRODUCT SEARCH ROUTING
   // ========================================
-
-  // 1. Full catalogue requests always fetch all products.
-
-  if (isCatalogBrowseRequest(text)) {
-    console.log("Catalogue browse request detected:", text);
-
-    await showProducts(jid, "");
-    return;
-  }
-
-  // 2. Explicit product requests search the database.
 
   if (isExplicitProductRequest(text)) {
     const searchTerm = extractProductSearchTerm(text);
+
+    if (!searchTerm) {
+      await showCategories(jid);
+      return;
+    }
 
     console.log("Explicit product search detected:", {
       message: text,
@@ -1906,13 +2104,14 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // 3. Standalone product names, brands, SKUs and
-  // categories are checked against MongoDB.
+  // ========================================
+  // STANDALONE PRODUCT NAMES / BRANDS / SKU
+  // ========================================
 
   if (shouldTryCatalogSearch(text)) {
     const searchTerm = extractProductSearchTerm(text);
 
-    console.log("Standalone product search detected:", {
+    console.log("Possible product search:", {
       message: text,
       searchTerm
     });
@@ -1936,30 +2135,41 @@ async function handleConversation(jid, text) {
   if (intent === "GREETING") {
     const aiResponse = await askCustomerAI(jid, text);
 
-    conversations.set(jid, { stage: "ai_chat" });
-
     await sendText(jid, aiResponse);
     return;
   }
 
   // ========================================
-  // MENU
+  // CATEGORY
   // ========================================
 
-  if (intent === "MENU") {
-    clearAIHistory(jid);
-    await showMainMenu(jid);
+  if (intent === "CATEGORY") {
+    await showCategories(jid);
     return;
   }
 
   // ========================================
-  // PRODUCT SEARCH FALLBACK
+  // FULL CATALOGUE
+  // ========================================
+
+  if (intent === "CATALOG") {
+    await showProducts(jid, "");
+    return;
+  }
+
+  // ========================================
+  // PRODUCT SEARCH
   // ========================================
 
   if (intent === "PRODUCT") {
     const searchTerm = extractProductSearchTerm(text);
 
-    await showProducts(jid, searchTerm);
+    if (searchTerm) {
+      await showProducts(jid, searchTerm);
+    } else {
+      await showCategories(jid);
+    }
+
     return;
   }
 
@@ -1983,19 +2193,17 @@ async function handleConversation(jid, text) {
 
     await sendText(
       jid,
-      "Please describe what you need. Our sales representative will assist you."
+      "Please describe what you need. Our customer service assistant will help you."
     );
 
     return;
   }
 
   // ========================================
-  // GENERAL QUESTIONS - GROQ
+  // GENERAL QUESTIONS / TECHNICAL QUESTIONS
   // ========================================
 
   const aiResponse = await askCustomerAI(jid, text);
-
-  conversations.set(jid, { stage: "ai_chat" });
 
   await sendText(jid, aiResponse);
 }
@@ -2306,9 +2514,7 @@ export async function startWhatsApp() {
 
             try {
               await sock.readMessages([message.key]);
-            } catch (error) {
-              // Read receipt failure should not block conversation.
-            }
+            } catch (error) {}
 
             console.log(
               "Incoming WhatsApp customer message received."
