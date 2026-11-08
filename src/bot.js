@@ -144,6 +144,22 @@ const AI_FOLLOW_UP_DELAY_MS =
   Number(process.env.AI_FOLLOW_UP_DELAY_MS) ||
   10 * 60 * 1000;
 
+// 9. Chat restart after customer inactivity
+// When a customer comes back after this much
+// silence, their next message starts a fresh
+// chat: the old order flow and AI memory are
+// cleared, so nobody is trapped in a stale
+// conversation.
+
+const AI_CHAT_RESTART_ENABLED =
+  process.env.AI_CHAT_RESTART_ENABLED !== "false";
+
+const CHAT_RESTART_INACTIVITY_MS =
+  Number(process.env.CHAT_RESTART_INACTIVITY_MS) ||
+  2 * 60 * 1000;
+
+const MAX_CHAT_ACTIVITY_ENTRIES = 5000;
+
 // ==========================================
 // PERSISTENT CUSTOMER WELCOME REGISTRY
 // ==========================================
@@ -782,13 +798,13 @@ Official customer service contact details:
 Phone/WhatsApp: ${CUSTOMER_SERVICE_PHONE}
 
 WhatsApp chat:
-${CUSTOMER_SERVICE_WHATSAPP_LINK}
+ ${CUSTOMER_SERVICE_WHATSAPP_LINK}
 
 Online store:
-${ONLINE_STORE_URL}
+ ${ONLINE_STORE_URL}
 
 Website:
-${OFFICIAL_WEBSITE_URL}
+ ${OFFICIAL_WEBSITE_URL}
 
 If a customer requests a human agent, customer care,
 a representative, or a member of the store team,
@@ -998,7 +1014,7 @@ async function matchCategoryWithAI(text, categories) {
             content: `You match a customer's message to ONE product category from the official category list of ${STORE_NAME}.
 
 OFFICIAL CATEGORIES:
-${categoryList}
+ ${categoryList}
 
 RULES:
 - If one category clearly matches what the customer is looking for, return ONLY that category name exactly as written in the list above.
@@ -1091,7 +1107,7 @@ async function answerProductListQuestion(
 
 The customer is currently viewing this list of REAL products from the store database:
 
-${productListText}
+ ${productListText}
 
 CRITICAL RULES:
 - Recommend or discuss ONLY the products in this list.
@@ -1214,7 +1230,7 @@ Current step: ${stage}.
 At this step, ${stageRequirement}.
 
 Order details captured so far:
-${orderSummary}
+ ${orderSummary}
 
 RULES:
 - Answer the customer's question briefly, friendly and professionally.
@@ -1830,6 +1846,106 @@ function scheduleFollowUp(jid, stage) {
   followUpTimers.set(jid, timer);
 }
 
+// ==========================================
+// AI ADD-ON 9: CHAT RESTART AFTER INACTIVITY
+// ==========================================
+
+// Remembers when each customer last sent a
+// message, so the bot can detect when they
+// come back after a long silence.
+
+const lastCustomerActivity = new Map();
+
+function rememberCustomerActivity(jid) {
+  const now = Date.now();
+
+  const previous =
+    lastCustomerActivity.get(jid) || 0;
+
+  lastCustomerActivity.set(jid, now);
+
+  while (
+    lastCustomerActivity.size >
+    MAX_CHAT_ACTIVITY_ENTRIES
+  ) {
+    const oldestKey =
+      lastCustomerActivity.keys().next().value;
+
+    if (!oldestKey) break;
+
+    lastCustomerActivity.delete(oldestKey);
+  }
+
+  return { now, previous };
+}
+
+// Called for every incoming customer message,
+// BEFORE the old conversation state is used.
+//
+// Returns true when the chat was restarted and
+// the caller should stop processing (the
+// customer was already greeted with a fresh
+// menu). Returns false when the message should
+// continue through the normal flow.
+
+async function restartChatIfInactive(jid, text) {
+  if (!AI_CHAT_RESTART_ENABLED) {
+    rememberCustomerActivity(jid);
+    return false;
+  }
+
+  const { now, previous } =
+    rememberCustomerActivity(jid);
+
+  // No previous activity means this is the very
+  // first message from this customer, so the
+  // normal first-contact welcome handles it.
+
+  if (!previous) return false;
+
+  const silenceMs = now - previous;
+
+  if (silenceMs < CHAT_RESTART_INACTIVITY_MS) {
+    return false;
+  }
+
+  // The customer is returning after a long
+  // silence. Give them a brand new chat.
+
+  const hadActiveConversation =
+    conversations.has(jid);
+
+  conversations.delete(jid);
+  clearAIHistory(jid);
+  clearFollowUpTimer(jid);
+
+  console.log(
+    "Customer chat restarted after inactivity:",
+    {
+      jid,
+      silenceMinutes: Math.round(
+        silenceMs / 60000
+      ),
+      hadActiveConversation
+    }
+  );
+
+  // A returning customer who just says hi gets
+  // the welcome menu immediately, so the chat
+  // visibly starts again from the beginning.
+
+  if (isGreetingOrAcknowledgement(text)) {
+    await showMainMenu(jid);
+
+    return true;
+  }
+
+  // A returning customer with a fresh request
+  // goes straight into a clean new session.
+
+  return false;
+}
+
 export function getAIAutomationStatus() {
   return {
     voiceTranscription: AI_VOICE_ENABLED,
@@ -1842,6 +1958,10 @@ export function getAIAutomationStatus() {
     followUpReminders: AI_FOLLOW_UP_ENABLED,
     followUpDelayMinutes: Math.round(
       AI_FOLLOW_UP_DELAY_MS / 60000
+    ),
+    chatRestartAfterInactivity: AI_CHAT_RESTART_ENABLED,
+    chatRestartInactivityMinutes: Math.round(
+      CHAT_RESTART_INACTIVITY_MS / 60000
     ),
     groqModel: GROQ_MODEL,
     transcriptionModel: GROQ_TRANSCRIBE_MODEL,
@@ -4572,6 +4692,19 @@ export async function startWhatsApp() {
                 // follow-up reminder for this customer
 
                 clearFollowUpTimer(jid);
+
+                // AI ENHANCEMENT: if the customer comes
+                // back after a period of no response,
+                // start a fresh chat instead of the old
+                // conversation session
+
+                const chatRestarted =
+                  await restartChatIfInactive(
+                    jid,
+                    text
+                  );
+
+                if (chatRestarted) return;
 
                 const firstWelcome =
                   await sendFounderWelcome(jid);
