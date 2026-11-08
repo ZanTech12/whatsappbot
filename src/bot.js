@@ -52,7 +52,7 @@ const MAX_DEDUPE_ENTRIES = 5000;
 const PRODUCTS_PER_PAGE = 8;
 
 // ==========================================
-// GROQ AI CONFIGURATION
+// GROQ AI
 // ==========================================
 
 let groqClient = null;
@@ -103,11 +103,14 @@ function saveAIHistory(jid, question, answer) {
     }
   );
 
-  aiHistory.set(jid, history.slice(-MAX_AI_HISTORY));
+  aiHistory.set(
+    jid,
+    history.slice(-MAX_AI_HISTORY)
+  );
 }
 
 // ==========================================
-// AI SYSTEM PROMPT
+// GROQ SYSTEM PROMPT
 // ==========================================
 
 function getAISystemPrompt() {
@@ -121,16 +124,7 @@ PERSONALITY:
 - Natural, conversational, warm and patient.
 - Understand Nigerian English and informal expressions.
 - Avoid robotic or repetitive responses.
-- Do not repeatedly introduce yourself.
 - Keep responses concise unless details are needed.
-
-GREETING BEHAVIOUR:
-Recognize greetings including:
-Hi, Hello, Hey, Good morning, Good afternoon,
-Good evening, How are you?, How far?, What's up?,
-Happy Sunday, Happy Monday, Happy weekend and Greetings.
-
-Respond naturally and politely.
 
 BUSINESS RESPONSIBILITIES:
 Help customers with enquiries about the business,
@@ -145,23 +139,18 @@ Product names, descriptions, prices, discounts,
 categories, brands, SKUs and stock quantities must
 come from the live ecommerce product API.
 
-You do not have permission to invent or assume
-the contents of the product catalogue.
+You must never invent product names.
 
-Never create imaginary product names.
+You must never guess product prices or availability.
 
-Never guess product prices or availability.
+You must never claim that a product exists unless
+it has been returned by the product API.
 
-Never claim that a product exists unless it has
-been returned by the product API.
+You must never claim that you checked inventory
+unless the application actually called the product API.
 
-Never claim that you checked the inventory unless
-the application has called the product API.
-
-If a customer asks to search, purchase, browse,
-check the price or check availability of a product,
-the application will retrieve the actual products
-from the ecommerce database.
+If a customer asks about a product, the application
+will search the actual ecommerce database.
 
 If the live product information is unavailable,
 explain that you cannot check it at the moment.
@@ -169,30 +158,14 @@ explain that you cannot check it at the moment.
 TECHNICAL GUIDANCE:
 Explain technical subjects in simple language.
 
-When calculating solar requirements, ask for relevant
-information:
+When calculating solar requirements, ask for:
 - Appliances they want to power.
 - Power ratings in watts.
 - Hours of usage.
 - Required backup duration.
 - Available budget, when relevant.
 
-Do not present estimates as guaranteed installation
-specifications.
-
-IMPORTANT BUSINESS RULES:
-- Never invent product prices.
-- Never invent product availability.
-- Never invent discounts.
-- Never invent delivery fees.
-- Never invent company contact information.
-- Never claim payment has been received without
-  payment confirmation.
-- Never claim an order has been created without
-  order API confirmation.
-- Never invent company policies.
-- Never request passwords, OTPs or card details.
-- Do not expose private payment information.
+Do not present estimates as guaranteed specifications.
 
 PURCHASES:
 When customers want to purchase products, guide them
@@ -202,10 +175,19 @@ ORDER TRACKING:
 When customers want to track an order, guide them
 through the order tracking process.
 
+BUSINESS RULES:
+- Never invent prices.
+- Never invent product availability.
+- Never invent discounts.
+- Never invent delivery fees.
+- Never claim payment has been received without confirmation.
+- Never claim an order has been created without API confirmation.
+- Never request passwords, OTPs or card details.
+- Never expose private payment information.
+
 WHATSAPP FORMATTING:
 - Use short paragraphs.
 - Use emojis naturally without overusing them.
-- Use simple Nigerian English where appropriate.
 - Avoid unnecessary technical language.
 
 You represent ${STORE_NAME}.
@@ -213,7 +195,7 @@ You represent ${STORE_NAME}.
 }
 
 // ==========================================
-// ASK GROQ AI
+// ASK GROQ
 // ==========================================
 
 async function askCustomerAI(jid, question) {
@@ -272,7 +254,7 @@ function fallbackIntent(message) {
   const text = String(message || "").toLowerCase().trim();
 
   if (
-    /^(hi|hello|hey|good morning|good afternoon|good evening|how far|how are you)[!. ]*$/.test(text)
+    /^(hi|hello|hey|hey there|good morning|good afternoon|good evening|how far|how are you)[!. ]*$/.test(text)
   ) {
     return "GREETING";
   }
@@ -311,7 +293,7 @@ async function detectMessageIntent(message) {
             content: `
 You are a message intent classifier for ${STORE_NAME}.
 
-Classify into exactly one category:
+Classify the customer's message into exactly one:
 
 GREETING
 MENU
@@ -320,44 +302,38 @@ TRACKING
 SUPPORT
 QUESTION
 
-RULES:
-
 GREETING:
-A greeting without another request.
+Greetings and casual acknowledgements.
 
 MENU:
 The customer wants the main menu.
 
 PRODUCT:
-The customer wants to:
-- Find or search for a product.
-- Buy or purchase something.
-- Check whether an item is available.
-- Ask for a product price.
-- Browse the store catalogue.
-- Ask whether the store sells a particular item.
-- Select or compare products available in the store.
+The customer wants to find, search, browse, buy,
+purchase, compare or check the price or availability
+of an item in the store.
 
 TRACKING:
 The customer wants to track an existing order.
 
 SUPPORT:
-The customer wants human assistance or customer service.
+The customer wants human assistance.
 
 QUESTION:
-General questions, technical explanations and other
-questions that do not require a product catalogue search.
+General technical questions and other enquiries.
 
-IMPORTANT:
-- Do not assume any product exists.
-- Do not invent product names.
-- A request mentioning a specific product is PRODUCT
-  when the customer wants to find, buy or check it.
-- A technical explanation request is QUESTION.
-- "How does an inverter work?" is QUESTION.
-- "How much is an inverter?" is PRODUCT.
-- "Good morning, I need a product" is PRODUCT.
-- "How far?" alone is GREETING.
+IMPORTANT EXAMPLES:
+
+"Hi" = GREETING
+"Okay" = GREETING
+"Thanks" = GREETING
+"What products do you have?" = PRODUCT
+"How much is this?" = PRODUCT
+"Solar Panels" = PRODUCT
+"Show me batteries" = PRODUCT
+"How does a solar panel work?" = QUESTION
+"How does an inverter work?" = QUESTION
+"Track my order" = TRACKING
 
 Return ONLY one category name.
 `
@@ -401,6 +377,96 @@ Return ONLY one category name.
 
     return fallbackIntent(message);
   }
+}
+
+// ==========================================
+// DIRECT PRODUCT ROUTING
+// ==========================================
+
+function isCatalogBrowseRequest(message) {
+  const text = String(message || "").toLowerCase().trim();
+
+  return /\b(what products can i get|what products do i have|what products do you have|what products are available|what do you have in store|what can i get in store|show me all products|show all products|browse all products|browse products|view all products|list all products|all products|your products|your catalogue|your catalog|product catalogue|product catalog)\b/i.test(text);
+}
+
+function isExplicitProductRequest(message) {
+  const text = String(message || "").toLowerCase().trim();
+
+  return /\b(do you have|have you got|do you sell|i want to buy|i want|i need|looking for|show me|find me|search for|how much is|how much does|what is the price|what's the price|price of|available for sale|in stock|buy|purchase|order|product price|check availability)\b/i.test(text);
+}
+
+function isGreetingOrAcknowledgement(message) {
+  const text = String(message || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[!.?,]+$/g, "")
+    .replace(/\s+/g, " ");
+
+  return /^(hi|hello|hey|hey there|hi there|hello there|good morning|good afternoon|good evening|how far|how are you|what's up|whats up|okay|ok|alright|all right|yes|no|sure|thanks|thank you|thank you so much|thanks a lot|cool|nice|great|good|fine|understood|i understand|no problem|perfect)$/.test(text);
+}
+
+function isTechnicalQuestion(message) {
+  const text = String(message || "").trim();
+
+  return /^(how does|how do|why does|why do|what is|what are|explain|tell me about|can you explain|what causes|what happens when|difference between)\b/i.test(text);
+}
+
+function shouldTryCatalogSearch(message) {
+  const text = String(message || "").trim();
+
+  if (!text) return false;
+
+  if (isGreetingOrAcknowledgement(text)) {
+    return false;
+  }
+
+  if (isTechnicalQuestion(text)) {
+    return false;
+  }
+
+  // A standalone phrase can be a product name,
+  // brand, SKU or category.
+  //
+  // Its actual existence is checked by MongoDB.
+  const words = text.split(/\s+/).filter(Boolean);
+
+  return (
+    words.length >= 1 &&
+    words.length <= 5 &&
+    !/[?!]/.test(text)
+  );
+}
+
+// ==========================================
+// EXTRACT SEARCH TERM
+// ==========================================
+
+function extractProductSearchTerm(message = "") {
+  let search = String(message || "").trim();
+
+  if (isCatalogBrowseRequest(search)) {
+    return "";
+  }
+
+  const prefixes = [
+    /^(please\s+)?(can you\s+)?(could you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
+    /^(please\s+)?(do you have|have you got|do you sell)\s+/i,
+    /^(please\s+)?(i want|i need|i would like|i am looking for|i'm looking for|looking for)\s+/i,
+    /^(please\s+)?(what is the price of|what's the price of|how much is|how much does)\s+/i,
+    /^(please\s+)?(buy|purchase|order)\s+/i,
+    /^(please\s+)?(price of|availability of)\s+/i
+  ];
+
+  for (const prefix of prefixes) {
+    search = search.replace(prefix, "");
+  }
+
+  search = search
+    .replace(/[?!]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return search;
 }
 
 // ==========================================
@@ -456,28 +522,6 @@ function getTypingDuration(message) {
   );
 }
 
-// ==========================================
-// PUBLIC STATUS FUNCTIONS
-// ==========================================
-
-export function getWhatsAppStatus() {
-  return {
-    status: connectionStatus,
-    qrAvailable: Boolean(currentQR),
-    pairingCode,
-    pairingRequested: Boolean(pendingPairingNumber),
-    authFolder: AUTH_FOLDER
-  };
-}
-
-export function getCurrentQR() {
-  return currentQR;
-}
-
-// ==========================================
-// GENERAL HELPERS
-// ==========================================
-
 function formatNaira(amount) {
   const numericAmount = Number(amount || 0);
 
@@ -515,6 +559,24 @@ function getText(message) {
     content?.templateButtonReplyMessage?.selectedId ||
     ""
   ).trim();
+}
+
+// ==========================================
+// PUBLIC STATUS
+// ==========================================
+
+export function getWhatsAppStatus() {
+  return {
+    status: connectionStatus,
+    qrAvailable: Boolean(currentQR),
+    pairingCode,
+    pairingRequested: Boolean(pendingPairingNumber),
+    authFolder: AUTH_FOLDER
+  };
+}
+
+export function getCurrentQR() {
+  return currentQR;
 }
 
 // ==========================================
@@ -590,9 +652,7 @@ function sendDocument(jid, document) {
     .catch(() => {})
     .then(async () => {
       if (!isConnected()) {
-        throw new Error(
-          "WhatsApp service is not connected."
-        );
+        throw new Error("WhatsApp service is not connected.");
       }
 
       try {
@@ -618,7 +678,7 @@ function sendDocument(jid, document) {
 }
 
 // ==========================================
-// INCOMING DUPLICATE PROTECTION
+// DUPLICATE MESSAGE PROTECTION
 // ==========================================
 
 function cleanProcessedMessages() {
@@ -657,7 +717,7 @@ function isDuplicateMessage(message) {
 }
 
 // ==========================================
-// PER-CUSTOMER INCOMING QUEUE
+// INCOMING MESSAGE QUEUE
 // ==========================================
 
 function queueIncomingMessage(jid, task) {
@@ -678,7 +738,7 @@ function queueIncomingMessage(jid, task) {
 }
 
 // ==========================================
-// SEND ACCOUNT VERIFICATION OTP
+// SEND WHATSAPP OTP
 // ==========================================
 
 export async function sendWhatsAppOTP(
@@ -723,7 +783,7 @@ export async function sendWhatsAppOTP(
 }
 
 // ==========================================
-// SEND NOTIFICATION AND OPTIONAL PDF RECEIPT
+// SEND NOTIFICATION AND OPTIONAL PDF
 // ==========================================
 
 export async function sendWhatsAppNotification(
@@ -739,24 +799,18 @@ export async function sendWhatsAppNotification(
   const number = normalizePhone(phone);
 
   if (number.length < 10 || number.length > 15) {
-    throw new Error(
-      "Invalid WhatsApp recipient phone number."
-    );
+    throw new Error("Invalid WhatsApp recipient phone number.");
   }
 
   if (
     typeof message !== "string" ||
     !message.trim()
   ) {
-    throw new Error(
-      "WhatsApp notification message is required."
-    );
+    throw new Error("WhatsApp notification message is required.");
   }
 
   if (message.length > 10000) {
-    throw new Error(
-      "WhatsApp notification message is too long."
-    );
+    throw new Error("WhatsApp notification message is too long.");
   }
 
   const jid = `${number}@s.whatsapp.net`;
@@ -767,18 +821,14 @@ export async function sendWhatsAppNotification(
 
   if (pdfBuffer !== null && pdfBuffer !== undefined) {
     if (!Buffer.isBuffer(pdfBuffer)) {
-      throw new Error(
-        "PDF receipt must be supplied as a Buffer."
-      );
+      throw new Error("PDF receipt must be supplied as a Buffer.");
     }
 
     if (
       !pdfBuffer.length ||
       pdfBuffer.length > MAX_PDF_SIZE
     ) {
-      throw new Error(
-        "PDF receipt is empty or exceeds the 7MB limit."
-      );
+      throw new Error("PDF receipt is empty or exceeds the 7MB limit.");
     }
 
     if (pdfBuffer.subarray(0, 5).toString() !== "%PDF-") {
@@ -812,7 +862,7 @@ export async function sendWhatsAppNotification(
 }
 
 // ==========================================
-// PRODUCT API RESPONSE VALIDATION
+// PRODUCT API VALIDATION
 // ==========================================
 
 function getProducts(data) {
@@ -864,9 +914,6 @@ function getCategoriesList(data) {
   ];
 }
 
-// Your backend returns the effective selling price in
-// product.price and the original price in originalPrice.
-
 function productPrice(product) {
   const price = Number(product.price);
 
@@ -882,59 +929,7 @@ function productOriginalPrice(product) {
 }
 
 // ==========================================
-// PRODUCT SEARCH PHRASE CLEANER
-// ==========================================
-
-function extractProductSearchTerm(message = "") {
-  let search = String(message || "")
-    .trim()
-    .replace(/[?!.,]/g, " ");
-
-  const prefixes = [
-    /^(please\s+)?(can you\s+)?(could you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
-    /^(please\s+)?(do you have|have you got|do you sell)\s+/i,
-    /^(please\s+)?(i want|i need|i would like|i am looking for|i'm looking for|looking for)\s+/i,
-    /^(please\s+)?(what is the price of|what's the price of|how much is|how much does)\s+/i,
-    /^(please\s+)?(buy|purchase|order)\s+/i
-  ];
-
-  for (const prefix of prefixes) {
-    search = search.replace(prefix, "");
-  }
-
-  search = search
-    .replace(
-      /\b(please|available|availability|in stock|for sale|price|prices|cost|product|products)\b/gi,
-      " "
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const genericRequests = [
-    "all",
-    "everything",
-    "all products",
-    "all items",
-    "what do you have",
-    "what is available",
-    "what's available",
-    "show me everything",
-    "show everything",
-    "browse",
-    "browse all"
-  ];
-
-  if (
-    genericRequests.includes(search.toLowerCase())
-  ) {
-    return "";
-  }
-
-  return search;
-}
-
-// ==========================================
-// FETCH AND DISPLAY PRODUCTS
+// DISPLAY PRODUCTS FROM MONGODB
 // ==========================================
 
 async function showProducts(
@@ -977,7 +972,7 @@ async function showProducts(
     const products = getProducts(result);
 
     console.log(
-      "Actual MongoDB products returned:",
+      "MongoDB products returned:",
       products.map(product => ({
         id: String(product._id),
         name: product.name,
@@ -1092,10 +1087,7 @@ async function showProducts(
     await sendText(jid, response);
 
   } catch (error) {
-    console.error(
-      "Product search error:",
-      error.message
-    );
+    console.error("Product search error:", error.message);
 
     state.products = [];
     state.stage = "browse_empty";
@@ -1110,7 +1102,7 @@ async function showProducts(
 }
 
 // ==========================================
-// BROWSE PRODUCT CATEGORIES
+// BROWSE CATEGORIES FROM MONGODB
 // ==========================================
 
 async function showCategories(jid) {
@@ -1135,7 +1127,7 @@ async function showCategories(jid) {
     const categories = getCategoriesList(result);
 
     console.log(
-      "Actual MongoDB product categories:",
+      "MongoDB categories returned:",
       categories
     );
 
@@ -1173,10 +1165,7 @@ async function showCategories(jid) {
     await sendText(jid, response);
 
   } catch (error) {
-    console.error(
-      "Category retrieval error:",
-      error.message
-    );
+    console.error("Category retrieval error:", error.message);
 
     state.stage = "browse_empty";
     state.categories = [];
@@ -1191,7 +1180,7 @@ async function showCategories(jid) {
 }
 
 // ==========================================
-// REFRESH PRODUCT DETAILS BEFORE SELECTION
+// GET FRESH PRODUCT DETAILS
 // ==========================================
 
 async function getFreshProduct(productId) {
@@ -1250,14 +1239,11 @@ async function createOrderFromConversation(jid, state) {
       whatsappPhone
     };
 
-    console.log(
-      "Submitting WhatsApp order to ecommerce backend:",
-      {
-        productId: state.product._id,
-        quantity: state.quantity,
-        whatsappPhone
-      }
-    );
+    console.log("Submitting WhatsApp order:", {
+      productId: state.product._id,
+      quantity: state.quantity,
+      whatsappPhone
+    });
 
     const result = await createGuestOrder(orderData);
 
@@ -1295,10 +1281,7 @@ async function createOrderFromConversation(jid, state) {
     clearAIHistory(jid);
 
   } catch (error) {
-    console.error(
-      "Order creation error:",
-      error.message
-    );
+    console.error("Order creation error:", error.message);
 
     await sendText(
       jid,
@@ -1335,7 +1318,9 @@ async function showMainMenu(jid) {
 // ==========================================
 
 async function handleConversation(jid, text) {
-  const normalized = String(text || "").toLowerCase().trim();
+  const normalized = String(text || "")
+    .toLowerCase()
+    .trim();
 
   let state = conversations.get(jid) || {};
 
@@ -1406,7 +1391,9 @@ async function handleConversation(jid, text) {
   // ========================================
 
   if (state.stage === "select_product") {
-    if (["next", "more", "next page"].includes(normalized)) {
+    if (
+      ["next", "more", "next page"].includes(normalized)
+    ) {
       if (state.currentPage >= state.totalPages) {
         await sendText(
           jid,
@@ -1466,7 +1453,6 @@ async function handleConversation(jid, text) {
     const selectedProduct = state.products[index];
 
     try {
-      // Retrieve the latest product information from MongoDB.
       const product = await getFreshProduct(
         selectedProduct._id
       );
@@ -1494,10 +1480,7 @@ async function handleConversation(jid, text) {
       );
 
     } catch (error) {
-      console.error(
-        "Product details error:",
-        error.message
-      );
+      console.error("Product details error:", error.message);
 
       await sendText(
         jid,
@@ -1689,7 +1672,10 @@ async function handleConversation(jid, text) {
   // ========================================
 
   if (state.stage === "zipCode") {
-    if (text.trim().length < 2 || text.trim().length > 20) {
+    if (
+      text.trim().length < 2 ||
+      text.trim().length > 20
+    ) {
       await sendText(
         jid,
         "Please enter a valid delivery postcode."
@@ -1871,13 +1857,52 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
+  // DIRECT DATABASE PRODUCT ROUTING
+  // ========================================
+
+  // 1. General request for the entire catalogue.
+  // This bypasses Groq completely.
+
+  if (isCatalogBrowseRequest(text)) {
+    await showProducts(jid, "");
+    return;
+  }
+
+  // 2. Explicit product requests.
+  // These go directly to the ecommerce backend.
+
+  if (isExplicitProductRequest(text)) {
+    const searchTerm = extractProductSearchTerm(text);
+
+    await showProducts(jid, searchTerm);
+    return;
+  }
+
+  // 3. Short standalone product names, brands,
+  // SKUs and categories are checked against MongoDB.
+  //
+  // Examples:
+  // Solar Panels
+  // Lithium Battery
+  // 5kVA Inverter
+  // A product brand
+  // An actual SKU
+
+  if (shouldTryCatalogSearch(text)) {
+    const searchTerm = extractProductSearchTerm(text);
+
+    await showProducts(jid, searchTerm);
+    return;
+  }
+
+  // ========================================
   // GROQ INTENT DETECTION
   // ========================================
 
   const intent = await detectMessageIntent(text);
 
   // ========================================
-  // GREETING
+  // GREETING / ACKNOWLEDGEMENT
   // ========================================
 
   if (intent === "GREETING") {
@@ -1900,7 +1925,7 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // PRODUCT SEARCH
+  // PRODUCT SEARCH FALLBACK
   // ========================================
 
   if (intent === "PRODUCT") {
@@ -1948,7 +1973,7 @@ async function handleConversation(jid, text) {
 }
 
 // ==========================================
-// PAIRING CODE
+// WHATSAPP PAIRING CODE
 // ==========================================
 
 async function issuePairingCode() {
@@ -2064,7 +2089,7 @@ export async function requestPairing(phoneNumber) {
 }
 
 // ==========================================
-// WHATSAPP STARTUP
+// START WHATSAPP
 // ==========================================
 
 export async function startWhatsApp() {
@@ -2305,10 +2330,7 @@ export async function startWhatsApp() {
   } catch (error) {
     starting = false;
 
-    console.error(
-      "WhatsApp startup error:",
-      error
-    );
+    console.error("WhatsApp startup error:", error);
 
     if (!reconnectTimer) {
       reconnectTimer = setTimeout(() => {
