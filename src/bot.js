@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 
 import makeWASocket, {
@@ -99,10 +98,7 @@ function saveAIHistory(jid, question, answer) {
     }
   );
 
-  aiHistory.set(
-    jid,
-    history.slice(-MAX_AI_HISTORY)
-  );
+  aiHistory.set(jid, history.slice(-MAX_AI_HISTORY));
 }
 
 // ==========================================
@@ -116,40 +112,23 @@ for ${STORE_NAME}, a solar energy and electrical
 products business in Nigeria.
 
 PERSONALITY:
-
 - Friendly, intelligent and professional.
-- Natural and conversational.
-- Warm, welcoming and patient.
+- Natural, conversational, warm and patient.
 - Understand Nigerian English and informal expressions.
 - Avoid robotic or repetitive responses.
 - Do not repeatedly introduce yourself.
 - Keep responses concise unless details are needed.
 
 GREETING BEHAVIOUR:
-
 Recognize greetings including:
-
-- Hi
-- Hello
-- Hey
-- Good morning
-- Good afternoon
-- Good evening
-- How are you?
-- How far?
-- What's up?
-- Happy Sunday
-- Happy Monday
-- Happy weekend
-- Greetings
-- Nigerian informal greetings.
+Hi, Hello, Hey, Good morning, Good afternoon,
+Good evening, How are you?, How far?, What's up?,
+Happy Sunday, Happy Monday, Happy weekend and Greetings.
 
 Respond naturally and politely.
 
 BUSINESS RESPONSIBILITIES:
-
 You can help customers with:
-
 1. Solar panels.
 2. Solar inverters.
 3. Lithium batteries.
@@ -162,11 +141,9 @@ You can help customers with:
 10. General solar technology questions.
 
 TECHNICAL GUIDANCE:
-
 Explain technical subjects in simple language.
 
 When calculating solar requirements, ask for relevant information:
-
 - Appliances they want to power.
 - Power ratings in watts.
 - Hours of usage.
@@ -176,13 +153,12 @@ When calculating solar requirements, ask for relevant information:
 Do not present estimates as guaranteed installation specifications.
 
 IMPORTANT BUSINESS RULES:
-
 - Never invent product prices.
 - Never invent product availability.
 - Never invent discounts.
 - Never invent delivery fees.
 - Never invent company contact information.
-- Never claim payment has been received without payment-system confirmation.
+- Never claim payment has been received without payment confirmation.
 - Never claim an order has been created without order API confirmation.
 - Never claim to have checked live products unless the product API was called.
 - Never invent company policies.
@@ -190,7 +166,6 @@ IMPORTANT BUSINESS RULES:
 - Do not expose private payment information.
 
 LIVE PRODUCT INFORMATION:
-
 Product prices, availability and stock must come from
 the actual product API, not from your own knowledge.
 
@@ -198,17 +173,14 @@ If live product information is unavailable, explain
 that the information cannot currently be checked.
 
 PURCHASES:
-
 When customers want to purchase products, guide them
 through the automated product ordering process.
 
 ORDER TRACKING:
-
 When customers want to track an order, guide them
 through the order tracking process.
 
 WHATSAPP FORMATTING:
-
 - Use short paragraphs.
 - Use emojis naturally without overusing them.
 - Use simple Nigerian English where appropriate.
@@ -225,21 +197,17 @@ You represent ${STORE_NAME}.
 async function askCustomerAI(jid, question) {
   try {
     const client = getGroqClient();
-
     const history = getAIHistory(jid);
 
     const completion =
       await client.chat.completions.create({
         model: GROQ_MODEL,
-
         messages: [
           {
             role: "system",
             content: getAISystemPrompt()
           },
-
           ...history,
-
           {
             role: "user",
             content: String(question).slice(
@@ -248,7 +216,6 @@ async function askCustomerAI(jid, question) {
             )
           }
         ],
-
         temperature: 0.3,
         max_tokens: 1000,
         stream: false
@@ -266,10 +233,7 @@ async function askCustomerAI(jid, question) {
     return answer;
 
   } catch (error) {
-    console.error(
-      "Groq AI error:",
-      error.message
-    );
+    console.error("Groq AI error:", error.message);
 
     return (
       "I'm sorry, I'm having difficulty responding " +
@@ -289,11 +253,9 @@ async function detectMessageIntent(message) {
     const completion =
       await client.chat.completions.create({
         model: GROQ_MODEL,
-
         messages: [
           {
             role: "system",
-
             content: `
 You are a message intent classifier for ${STORE_NAME}.
 
@@ -307,7 +269,6 @@ SUPPORT
 QUESTION
 
 Rules:
-
 - Greeting alone: GREETING.
 - Explicit menu request: MENU.
 - Product search or purchase: PRODUCT.
@@ -323,7 +284,6 @@ Rules:
 Return ONLY one category name.
 `
           },
-
           {
             role: "user",
             content: String(message).slice(
@@ -332,7 +292,6 @@ Return ONLY one category name.
             )
           }
         ],
-
         temperature: 0,
         max_tokens: 20
       });
@@ -352,9 +311,7 @@ Return ONLY one category name.
       "QUESTION"
     ];
 
-    return allowed.includes(intent)
-      ? intent
-      : "QUESTION";
+    return allowed.includes(intent) ? intent : "QUESTION";
 
   } catch (error) {
     console.error(
@@ -459,6 +416,12 @@ function normalizePhone(phone) {
   return number;
 }
 
+function getWhatsAppPhone(jid) {
+  const rawNumber = String(jid || "").split("@")[0];
+
+  return normalizePhone(rawNumber);
+}
+
 function getText(message) {
   const content = message?.message;
 
@@ -510,9 +473,7 @@ async function sendTextNow(jid, message) {
 
   try {
     await sock.sendMessage(jid, { text });
-
     lastMessageSent.set(jid, Date.now());
-
   } finally {
     try {
       if (sock) {
@@ -646,9 +607,7 @@ export async function sendWhatsAppOTP(
   name = "Customer"
 ) {
   if (!isConnected()) {
-    throw new Error(
-      "WhatsApp service is not connected."
-    );
+    throw new Error("WhatsApp service is not connected.");
   }
 
   const number = normalizePhone(phone);
@@ -694,9 +653,7 @@ export async function sendWhatsAppNotification(
   fileName = "Divine-Solar-Hub-Receipt.pdf"
 ) {
   if (!isConnected()) {
-    throw new Error(
-      "WhatsApp service is not connected."
-    );
+    throw new Error("WhatsApp service is not connected.");
   }
 
   const number = normalizePhone(phone);
@@ -778,42 +735,119 @@ export async function sendWhatsAppNotification(
 // PRODUCT HELPERS
 // ==========================================
 
+// Your Vercel endpoint returns:
+// {
+//   success: true,
+//   total: 10,
+//   page: 1,
+//   pages: 1,
+//   products: [...]
+// }
+//
+// Only accept this exact response structure.
+// Do not interpret unrelated arrays as products.
+
 function getProducts(data) {
-  if (Array.isArray(data)) {
-    return data;
+  if (
+    !data ||
+    data.success !== true ||
+    !Array.isArray(data.products)
+  ) {
+    console.error(
+      "Invalid product API response:",
+      JSON.stringify(data).slice(0, 2000)
+    );
+
+    return [];
   }
 
-  const products =
-    data?.products ??
-    data?.data?.products ??
-    data?.data;
-
-  return Array.isArray(products) ? products : [];
+  return data.products.filter(product =>
+    product &&
+    typeof product === "object" &&
+    !Array.isArray(product) &&
+    product._id &&
+    product.name
+  );
 }
 
 function productPrice(product) {
   const discount = Number(product.discountPrice || 0);
   const price = Number(product.price || 0);
 
-  return discount > 0 && discount < price
+  return (
+    Number.isFinite(discount) &&
+    Number.isFinite(price) &&
+    discount > 0 &&
+    discount < price
+  )
     ? discount
     : price;
+}
+
+// ==========================================
+// PRODUCT SEARCH PHRASE CLEANER
+// ==========================================
+
+function extractProductSearchTerm(message = "") {
+  let search = String(message || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[?!.,]/g, " ");
+
+  const prefixes = [
+    /^(please\s+)?(can you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
+    /^(please\s+)?(do you have|have you got)\s+/i,
+    /^(please\s+)?(i want|i need|i am looking for|i'm looking for|looking for)\s+/i,
+    /^(please\s+)?(what is the price of|how much is|how much does)\s+/i
+  ];
+
+  for (const prefix of prefixes) {
+    search = search.replace(prefix, "");
+  }
+
+  search = search
+    .replace(
+      /\b(available|availability|in stock|please|for sale)\b/gi,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return search;
 }
 
 // ==========================================
 // PRODUCT SEARCH DETECTION
 // ==========================================
 
-// Deterministic detection prevents Groq from intercepting
-// common product searches and price enquiries.
-
 function isProductSearchMessage(message) {
-  const text = String(message || "").toLowerCase();
+  const text = String(message || "")
+    .toLowerCase()
+    .trim();
 
-  const productKeywords =
-    /\b(inverter|inverters|battery|batteries|lithium|tubular|solar panel|solar panels|panel|panels|charge controller|controller|controllers|solar light|solar lights|cable|cables|wire|wires|breaker|breakers|generator|generators|ups|kva|kw|watt|watts|product|products|price|prices|cost|available|availability|buy|purchase|stock)\b/i;
+  if (!text) return false;
 
-  return productKeywords.test(text);
+  const technicalQuestion =
+    /\b(how does|how do|how can|how to|what is|what are|why does|why do|explain|calculate|calculate for me|difference between|work|works|working|function|functions|operate|operates|operating|install|installation|size|sizing)\b/i;
+
+  const purchaseIntent =
+    /\b(buy|purchase|order|book|checkout|i want|i need|looking for|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|list products|browse products)\b/i;
+
+  const productTerms =
+    /\b(inverter|inverters|battery|batteries|lithium|tubular|solar panel|solar panels|panel|panels|charge controller|controller|controllers|solar light|solar lights|cable|cables|wire|wires|breaker|breakers|generator|generators|ups|kva|kw|watt|watts|product|products)\b/i;
+
+  const hasProduct = productTerms.test(text);
+  const hasPurchaseIntent = purchaseIntent.test(text);
+
+  // Technical questions should normally be handled by Groq.
+  if (
+    technicalQuestion.test(text) &&
+    !hasPurchaseIntent
+  ) {
+    return false;
+  }
+
+  return hasPurchaseIntent || hasProduct;
 }
 
 // ==========================================
@@ -934,78 +968,123 @@ export async function requestPairing(phoneNumber) {
 
 // ==========================================
 // PRODUCT SEARCH AND BROWSING
-// ORIGINAL API LOGIC PRESERVED
 // ==========================================
 
 async function showProducts(jid, search = "") {
+  const state = conversations.get(jid) || {};
+
+  // Clear previous search results immediately.
+  state.products = [];
+  state.product = null;
+  state.stage = "search";
+
+  conversations.set(jid, state);
+
+  const searchTerm = extractProductSearchTerm(search);
+
   try {
     console.log(
-      "Searching products through existing API:",
-      search || "ALL PRODUCTS"
+      "Searching Vercel product API:",
+      searchTerm || "ALL PRODUCTS"
     );
 
-    // Keep the original API call.
-    const result = await searchProducts(search);
+    const result = await searchProducts(searchTerm);
 
-    // Keep the original response parser.
+    // Strictly read the products returned by the backend.
     const products = getProducts(result);
 
+    console.log(
+      "Products returned by API:",
+      products.map(product => ({
+        id: String(product._id),
+        name: product.name,
+        sku: product.sku,
+        price: product.price,
+        stock: product.countInStock
+      }))
+    );
+
     if (!products.length) {
+      state.products = [];
+      state.stage = "search";
+
+      conversations.set(jid, state);
+
       await sendText(
         jid,
-        search
-          ? `I couldn't find "${search}". Please try another product name or category.`
-          : "There are currently no products available. Please check again later."
+        searchTerm
+          ? `I couldn't find "${searchTerm}" in our product database. Please try another product name or category.`
+          : "There are currently no active products available in our store."
       );
 
       return;
     }
 
+    // Backend already filters isActive:true.
+    // Keep only valid product records from its response.
     const available = products
-      .filter(product => product.isActive !== false)
+      .filter(product =>
+        product._id &&
+        product.name &&
+        Number.isFinite(Number(product.price))
+      )
       .slice(0, 8);
 
     if (!available.length) {
+      state.products = [];
+      state.stage = "search";
+
+      conversations.set(jid, state);
+
       await sendText(
         jid,
-        "No active products are currently available."
+        "No valid products were returned by our product database."
       );
 
       return;
     }
-
-    let response = search
-      ? `*${STORE_NAME} - PRODUCT SEARCH RESULTS*\n\n`
-      : `*${STORE_NAME} - AVAILABLE PRODUCTS*\n\n`;
-
-    available.forEach((product, index) => {
-      response +=
-        `*${index + 1}. ${product.name}*\n` +
-        `Price: ${formatNaira(productPrice(product))}\n` +
-        `Stock: ${
-          Number(product.countInStock || 0) > 0
-            ? product.countInStock
-            : "Out of stock"
-        }\n\n`;
-    });
-
-    response +=
-      "Reply with the product number to select it.\n\n" +
-      "Type MENU to return to the main menu.";
-
-    const state = conversations.get(jid) || {};
 
     state.products = available;
     state.stage = "select_product";
 
     conversations.set(jid, state);
 
+    let response = searchTerm
+      ? `*${STORE_NAME} - PRODUCT SEARCH RESULTS*\n\n`
+      : `*${STORE_NAME} - AVAILABLE PRODUCTS*\n\n`;
+
+    available.forEach((product, index) => {
+      const stock = Number(product.countInStock || 0);
+
+      response +=
+        `*${index + 1}. ${product.name}*\n` +
+        `Price: ${formatNaira(productPrice(product))}\n` +
+        `Stock: ${stock > 0 ? stock : "Out of stock"}\n`;
+
+      if (product.sku) {
+        response += `SKU: ${product.sku}\n`;
+      }
+
+      response += "\n";
+    });
+
+    response +=
+      "Reply with the product number to select it.\n\n" +
+      "Type MENU to return to the main menu.";
+
     await sendText(jid, response);
 
   } catch (error) {
-    console.error("Product search:", error.message);
+    console.error(
+      "Product search error:",
+      error.message
+    );
 
-    // Do not replace actual API errors with invented AI product answers.
+    state.products = [];
+    state.stage = "search";
+
+    conversations.set(jid, state);
+
     await sendText(
       jid,
       "Sorry, I cannot check products at the moment. Please try again shortly."
@@ -1015,11 +1094,24 @@ async function showProducts(jid, search = "") {
 
 // ==========================================
 // CREATE CUSTOMER ORDER
-// ORIGINAL API LOGIC PRESERVED
+// MATCHES YOUR VERCEL ORDER CONTROLLER
 // ==========================================
 
 async function createOrderFromConversation(jid, state) {
   try {
+    if (!state.product?._id) {
+      throw new Error("No valid product was selected.");
+    }
+
+    const whatsappPhone = getWhatsAppPhone(jid);
+    const customerPhone = normalizePhone(state.phone);
+
+    if (!whatsappPhone || customerPhone !== whatsappPhone) {
+      throw new Error(
+        "Delivery phone number does not match WhatsApp number."
+      );
+    }
+
     const orderData = {
       items: [
         {
@@ -1030,57 +1122,67 @@ async function createOrderFromConversation(jid, state) {
 
       shippingAddress: {
         fullName: state.fullName,
-        phone: state.phone,
+        phone: customerPhone,
         street: state.address,
         city: state.city,
         state: state.state,
+        zipCode: state.zipCode,
         country: "Nigeria"
       },
 
-      paymentMethod: "monnify",
-
-      whatsappPhone: jid.split("@")[0]
+      whatsappPhone
     };
+
+    console.log(
+      "Submitting WhatsApp order to Vercel:",
+      {
+        productId: state.product._id,
+        quantity: state.quantity,
+        whatsappPhone
+      }
+    );
 
     const result = await createGuestOrder(orderData);
 
-    const order =
-      result.order ||
-      result.data?.order ||
-      result.data ||
-      {};
-
-    const checkoutUrl =
-      result.checkoutUrl ||
-      order.checkoutUrl;
-
-    if (!checkoutUrl) {
+    if (!result || result.success !== true || !result.order) {
       throw new Error(
-        "No Monnify checkout URL was returned."
+        result?.message || "The order API did not confirm the order."
       );
     }
 
+    const order = result.order;
+
+    // The current backend does not return a Monnify checkout URL.
+    // Therefore, do not invent one or claim payment has been completed.
+    const totalAmount = Number(order.totalAmount || 0);
+
     await sendText(
       jid,
-      `*${STORE_NAME} - ORDER CREATED*\n\n` +
-      `Order: ${order.orderNumber || result.orderNumber || "Created"}\n` +
+      `*${STORE_NAME} - ORDER CREATED* ☀️\n\n` +
+      `Your order has been successfully recorded.\n\n` +
+      `Order Number: *${order.orderNumber || "Pending"}*\n` +
       `Product: ${state.product.name}\n` +
       `Quantity: ${state.quantity}\n` +
-      `Total: ${formatNaira(order.totalAmount || result.totalAmount)}\n\n` +
-      `Please complete your payment using this secure link:\n` +
-      `${checkoutUrl}\n\n` +
-      `Your order will be confirmed after Monnify verifies the payment.`
+      `Total: ${formatNaira(totalAmount)}\n` +
+      `Order Status: ${order.status || "pending"}\n` +
+      `Payment Status: ${order.paymentStatus || "pending"}\n\n` +
+      `Your order is currently awaiting payment. ` +
+      `Our payment process must be completed before the order can be confirmed.\n\n` +
+      `Please keep your order number for reference.`
     );
 
     conversations.delete(jid);
     clearAIHistory(jid);
 
   } catch (error) {
-    console.error("Order creation:", error.message);
+    console.error(
+      "Order creation error:",
+      error.message
+    );
 
     await sendText(
       jid,
-      "I couldn't complete your order. Please try again or contact our sales team."
+      `I couldn't complete your order.\n\n${error.message}\n\nPlease check your details and try again, or type MENU.`
     );
   }
 }
@@ -1124,9 +1226,7 @@ async function handleConversation(jid, text) {
     ["menu", "start", "main menu", "home"].includes(normalized)
   ) {
     clearAIHistory(jid);
-
     await showMainMenu(jid);
-
     return;
   }
 
@@ -1149,8 +1249,7 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // ACTIVE TRANSACTION STAGES FIRST
-  // Never let Groq interrupt these stages.
+  // ACTIVE TRANSACTION STAGES
   // ========================================
 
   if (state.stage === "search") {
@@ -1164,7 +1263,6 @@ async function handleConversation(jid, text) {
     }
 
     await showProducts(jid, text);
-
     return;
   }
 
@@ -1189,7 +1287,7 @@ async function handleConversation(jid, text) {
     if (Number(product.countInStock || 0) < 1) {
       await sendText(
         jid,
-        "Sorry, this product is out of stock."
+        "Sorry, this product is out of stock. Please select another product."
       );
 
       return;
@@ -1233,7 +1331,6 @@ async function handleConversation(jid, text) {
     conversations.set(jid, state);
 
     await sendText(jid, "Please enter your full name.");
-
     return;
   }
 
@@ -1243,21 +1340,35 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    state.fullName = text;
+    state.fullName = text.trim();
     state.stage = "phone";
 
     conversations.set(jid, state);
 
-    await sendText(jid, "Enter your delivery phone number.");
+    await sendText(
+      jid,
+      "Enter your delivery phone number.\n\n" +
+      "For security, it must be the same number you are using to chat with us on WhatsApp."
+    );
 
     return;
   }
 
   if (state.stage === "phone") {
     const phone = normalizePhone(text);
+    const whatsappPhone = getWhatsAppPhone(jid);
 
     if (phone.length < 10 || phone.length > 15) {
       await sendText(jid, "Please enter a valid phone number.");
+      return;
+    }
+
+    if (phone !== whatsappPhone) {
+      await sendText(
+        jid,
+        "The delivery phone number must match the WhatsApp number you are using to place this order. Please enter your WhatsApp number."
+      );
+
       return;
     }
 
@@ -1276,17 +1387,20 @@ async function handleConversation(jid, text) {
 
   if (state.stage === "address") {
     if (text.length < 5) {
-      await sendText(jid, "Please enter a complete delivery address.");
+      await sendText(
+        jid,
+        "Please enter a complete delivery address."
+      );
+
       return;
     }
 
-    state.address = text;
+    state.address = text.trim();
     state.stage = "city";
 
     conversations.set(jid, state);
 
     await sendText(jid, "Which city or town?");
-
     return;
   }
 
@@ -1296,13 +1410,12 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    state.city = text;
+    state.city = text.trim();
     state.stage = "state";
 
     conversations.set(jid, state);
 
     await sendText(jid, "Which state in Nigeria?");
-
     return;
   }
 
@@ -1312,17 +1425,39 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    state.state = text;
+    state.state = text.trim();
+    state.stage = "zipCode";
 
     conversations.set(jid, state);
 
     await sendText(
       jid,
-      "Please wait while I prepare your order and payment link."
+      "Please enter your delivery postcode or ZIP code.\n\nIf your area does not have a postcode, enter the appropriate postcode for your delivery location."
+    );
+
+    return;
+  }
+
+  if (state.stage === "zipCode") {
+    if (text.trim().length < 2 || text.trim().length > 20) {
+      await sendText(
+        jid,
+        "Please enter a valid delivery postcode."
+      );
+
+      return;
+    }
+
+    state.zipCode = text.trim();
+
+    conversations.set(jid, state);
+
+    await sendText(
+      jid,
+      "Please wait while I submit your order to our store..."
     );
 
     await createOrderFromConversation(jid, state);
-
     return;
   }
 
@@ -1367,13 +1502,27 @@ async function handleConversation(jid, text) {
         throw new Error("Order not found.");
       }
 
+      let itemsText = "";
+
+      if (Array.isArray(order.items)) {
+        itemsText = order.items
+          .map(item =>
+            `${item.name || "Product"} x ${item.quantity || 1}`
+          )
+          .join("\n");
+      }
+
       await sendText(
         jid,
-        `*ORDER STATUS*\n\n` +
+        `*${STORE_NAME} - ORDER STATUS*\n\n` +
         `Order: ${order.orderNumber}\n` +
-        `Status: ${order.status}\n` +
-        `Payment: ${order.paymentStatus}\n` +
-        `Total: ${formatNaira(order.totalAmount)}`
+        (itemsText ? `Items:\n${itemsText}\n\n` : "") +
+        `Status: ${order.status || "Unavailable"}\n` +
+        `Payment: ${order.paymentStatus || "Unavailable"}\n` +
+        `Subtotal: ${formatNaira(order.subtotal)}\n` +
+        `Shipping: ${formatNaira(order.shippingCost)}\n` +
+        `Total: ${formatNaira(order.totalAmount)}\n\n` +
+        `Thank you for shopping with ${STORE_NAME}.`
       );
 
       conversations.delete(jid);
@@ -1397,7 +1546,6 @@ async function handleConversation(jid, text) {
     );
 
     conversations.delete(jid);
-
     return;
   }
 
@@ -1422,9 +1570,7 @@ async function handleConversation(jid, text) {
     ["2", "browse", "browse products", "view products", "all products"].includes(normalized)
   ) {
     conversations.set(jid, {});
-
     await showProducts(jid, "");
-
     return;
   }
 
@@ -1434,7 +1580,6 @@ async function handleConversation(jid, text) {
     conversations.set(jid, { stage: "order_number" });
 
     await sendText(jid, "Please enter your order number.");
-
     return;
   }
 
@@ -1453,12 +1598,12 @@ async function handleConversation(jid, text) {
 
   // ========================================
   // DIRECT PRODUCT SEARCH BEFORE GROQ
-  // This preserves the original working API logic.
   // ========================================
 
   if (isProductSearchMessage(text)) {
-    await showProducts(jid, text);
+    const searchTerm = extractProductSearchTerm(text);
 
+    await showProducts(jid, searchTerm);
     return;
   }
 
@@ -1474,21 +1619,19 @@ async function handleConversation(jid, text) {
     conversations.set(jid, { stage: "ai_chat" });
 
     await sendText(jid, aiResponse);
-
     return;
   }
 
   if (intent === "MENU") {
     clearAIHistory(jid);
-
     await showMainMenu(jid);
-
     return;
   }
 
   if (intent === "PRODUCT") {
-    await showProducts(jid, text);
+    const searchTerm = extractProductSearchTerm(text);
 
+    await showProducts(jid, searchTerm);
     return;
   }
 
@@ -1496,7 +1639,6 @@ async function handleConversation(jid, text) {
     conversations.set(jid, { stage: "order_number" });
 
     await sendText(jid, "Please enter your order number.");
-
     return;
   }
 
@@ -1532,10 +1674,7 @@ export async function startWhatsApp() {
   starting = true;
 
   try {
-    fs.mkdirSync(
-      AUTH_FOLDER,
-      { recursive: true }
-    );
+    fs.mkdirSync(AUTH_FOLDER, { recursive: true });
 
     console.log(
       "Using WhatsApp authentication folder:",
@@ -1707,9 +1846,7 @@ export async function startWhatsApp() {
             const text = getText(message);
 
             if (!text) continue;
-
             if (!isConnected()) continue;
-
             if (isDuplicateMessage(message)) continue;
 
             try {
