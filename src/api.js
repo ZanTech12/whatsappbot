@@ -13,51 +13,110 @@ const API_URL = process.env.VERCEL_API_URL
 const BOT_SECRET = process.env.BOT_API_SECRET;
 
 // ==========================================
+// CONFIGURATION
+// ==========================================
+
+const DEFAULT_LIMIT = 8;
+const MAX_LIMIT = 50;
+const REQUEST_TIMEOUT = 20000;
+
+// ==========================================
 // COMMON API REQUEST
 // ==========================================
 
 async function request(path, options = {}) {
   if (!API_URL || !BOT_SECRET) {
     throw new Error(
-      "Vercel API configuration is missing. Check VERCEL_API_URL and BOT_API_SECRET."
+      "Missing VERCEL_API_URL or BOT_API_SECRET."
     );
   }
+
+  const controller = new AbortController();
+
+  const timeout = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT
+  );
 
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...options,
+      signal: controller.signal,
       headers: {
+        Accept: "application/json",
         "Content-Type": "application/json",
         "x-bot-secret": BOT_SECRET,
         ...options.headers
       }
     });
 
-    const data = await response.json().catch(() => null);
+    const raw = await response.text();
+
+    let data;
+
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      throw new Error(
+        `Backend returned invalid JSON. HTTP ${response.status}.`
+      );
+    }
 
     if (!response.ok) {
       throw new Error(
         data?.message ||
-        `Backend returned HTTP ${response.status}`
+        data?.error ||
+        `Backend returned HTTP ${response.status}.`
       );
     }
 
-    if (!data) {
+    if (!data || typeof data !== "object") {
       throw new Error(
-        "Backend returned an invalid JSON response."
+        "Backend returned an empty or invalid response."
+      );
+    }
+
+    if (data.success === false) {
+      throw new Error(
+        data.message || "The API request was unsuccessful."
       );
     }
 
     return data;
 
   } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Backend request timed out.");
+    }
+
     console.error(
-      `WhatsApp API request failed (${path}):`,
+      `WhatsApp API error [${path}]:`,
       error.message
     );
 
     throw error;
+
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+// ==========================================
+// HELPERS
+// ==========================================
+
+function safeNumber(value, fallback, min, max) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
+function encode(value) {
+  return encodeURIComponent(String(value));
 }
 
 // ==========================================
@@ -67,42 +126,57 @@ async function request(path, options = {}) {
 export async function searchProducts(
   search = "",
   page = 1,
-  limit = 8,
+  limit = DEFAULT_LIMIT,
   category = ""
 ) {
   const params = new URLSearchParams();
 
-  params.set("page", String(page));
-  params.set("limit", String(limit));
+  const normalizedSearch = String(search || "").trim();
+  const normalizedCategory = String(category || "").trim();
 
-  if (String(search).trim()) {
-    params.set("search", String(search).trim());
+  const currentPage = safeNumber(page, 1, 1, 100000);
+  const currentLimit = safeNumber(limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
+
+  params.set("page", String(currentPage));
+  params.set("limit", String(currentLimit));
+
+  if (normalizedSearch) {
+    params.set("search", normalizedSearch);
   }
 
-  if (String(category).trim()) {
-    params.set("category", String(category).trim());
+  if (normalizedCategory) {
+    params.set("category", normalizedCategory);
   }
 
-  const endpoint =
-    `/api/whatsapp/products?${params.toString()}`;
+  const endpoint = `/api/whatsapp/products?${params.toString()}`;
 
   console.log("WhatsApp product API request:", {
-    search,
-    page,
-    limit,
-    category,
+    search: normalizedSearch,
+    page: currentPage,
+    limit: currentLimit,
+    category: normalizedCategory,
     endpoint
   });
 
   const data = await request(endpoint);
 
+  const products = Array.isArray(data.products)
+    ? data.products
+    : [];
+
   console.log("WhatsApp product API response:", {
     success: data.success,
     total: data.total,
-    returned: data.products?.length
+    returned: products.length
   });
 
-  return data;
+  return {
+    ...data,
+    products,
+    total: Number(data.total) || products.length,
+    page: Number(data.page) || currentPage,
+    limit: Number(data.limit) || currentLimit
+  };
 }
 
 // ==========================================
@@ -110,7 +184,16 @@ export async function searchProducts(
 // ==========================================
 
 export async function getCategories() {
-  return request("/api/whatsapp/categories");
+  const data = await request(
+    "/api/whatsapp/categories"
+  );
+
+  return {
+    ...data,
+    categories: Array.isArray(data.categories)
+      ? data.categories
+      : []
+  };
 }
 
 // ==========================================
@@ -123,7 +206,7 @@ export async function getProductDetails(productId) {
   }
 
   return request(
-    `/api/whatsapp/products/${encodeURIComponent(productId)}`
+    `/api/whatsapp/products/${encode(productId)}`
   );
 }
 
@@ -132,8 +215,14 @@ export async function getProductDetails(productId) {
 // ==========================================
 
 export async function createGuestOrder(orderData) {
-  if (!orderData || typeof orderData !== "object") {
-    throw new Error("Valid order information is required.");
+  if (
+    !orderData ||
+    typeof orderData !== "object" ||
+    Array.isArray(orderData)
+  ) {
+    throw new Error(
+      "Valid order information is required."
+    );
   }
 
   return request("/api/whatsapp/orders", {
@@ -161,7 +250,51 @@ export async function getOrderStatus(
   params.set("whatsappPhone", whatsappPhone);
 
   return request(
-    `/api/whatsapp/orders/${encodeURIComponent(orderNumber)}` +
-    `?${params.toString()}`
+    `/api/whatsapp/orders/${encode(orderNumber)}?${params.toString()}`
+  );
+}
+
+// ==========================================
+// 6. GET ALL PRODUCTS
+// ==========================================
+
+export async function getAllProducts() {
+  return searchProducts("", 1, MAX_LIMIT);
+}
+
+// ==========================================
+// 7. SEARCH PRODUCTS BY CATEGORY
+// ==========================================
+
+export async function searchProductsByCategory(
+  category,
+  page = 1,
+  limit = DEFAULT_LIMIT
+) {
+  if (!category) {
+    throw new Error("Category is required.");
+  }
+
+  return searchProducts(
+    "",
+    page,
+    limit,
+    category
+  );
+}
+
+// ==========================================
+// 8. SEARCH PRODUCTS BY NAME
+// ==========================================
+
+export async function findProducts(search) {
+  if (!String(search || "").trim()) {
+    return searchProducts("", 1, DEFAULT_LIMIT);
+  }
+
+  return searchProducts(
+    search,
+    1,
+    DEFAULT_LIMIT
   );
 }
