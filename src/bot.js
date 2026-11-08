@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 
 import makeWASocket, {
@@ -134,16 +133,19 @@ function saveWelcomedCustomers() {
 }
 
 // ==========================================
-// NIGERIA DATE AND TIME
+// ACCURATE JAVASCRIPT DATE AND TIME
+// NIGERIA TIMEZONE: AFRICA/LAGOS
 // ==========================================
 
 function getStoreDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: STORE_TIMEZONE,
     year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
     hourCycle: "h23"
   }).formatToParts(date);
 
@@ -158,13 +160,73 @@ function getStoreDateParts(date = new Date()) {
   return result;
 }
 
+// Get the current store time directly from JavaScript.
+
 function getTimeGreeting() {
   const { hour } = getStoreDateParts();
 
-  if (hour >= 5 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (!Number.isFinite(hour)) {
+    console.error(
+      "Unable to determine store hour. Using neutral greeting."
+    );
 
-  return "Good evening";
+    return "Hello";
+  }
+
+  if (hour >= 5 && hour < 12) {
+    return "Good morning";
+  }
+
+  if (hour >= 12 && hour < 17) {
+    return "Good afternoon";
+  }
+
+  if (hour >= 17 && hour < 21) {
+    return "Good evening";
+  }
+
+  return "Hello";
+}
+
+// Display the actual time the bot is using.
+// This helps diagnose hosting timezone problems.
+
+function logStoreClock() {
+  try {
+    const {
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second
+    } = getStoreDateParts();
+
+    const formattedTime =
+      `${String(hour).padStart(2, "0")}:` +
+      `${String(minute).padStart(2, "0")}:` +
+      `${String(second).padStart(2, "0")}`;
+
+    const formattedDate =
+      `${String(day).padStart(2, "0")}/` +
+      `${String(month).padStart(2, "0")}/` +
+      `${year}`;
+
+    console.log("------------------------------------------");
+    console.log("STORE TIME DIAGNOSTIC");
+    console.log("Timezone:", STORE_TIMEZONE);
+    console.log("Nigeria date:", formattedDate);
+    console.log("Nigeria time:", formattedTime);
+    console.log("Greeting:", getTimeGreeting());
+    console.log("JavaScript UTC:", new Date().toISOString());
+    console.log("------------------------------------------");
+
+  } catch (error) {
+    console.error(
+      "Store clock diagnostic failed:",
+      error.message
+    );
+  }
 }
 
 // ==========================================
@@ -607,7 +669,6 @@ function isCategoryBrowseRequest(message) {
   const text = normalizeMessage(message);
 
   const patterns = [
-    // General inventory questions
     /\bwhat products can i get\b/,
     /\bwhat products can i get here\b/,
     /\bwhat can i get here\b/,
@@ -631,8 +692,6 @@ function isCategoryBrowseRequest(message) {
     /\btell me what products you have\b/,
     /\bwhat products are in this store\b/,
     /\bso what products can i get here\b/,
-
-    // Existing category questions
     /\bthe products in (this|your|the) store\b/,
     /\bproducts in (this|your|the) store\b/,
     /\bproducts available in (this|your|the) store\b/,
@@ -782,17 +841,11 @@ function extractProductSearchTerm(message = "") {
 
   const prefixes = [
     /^(please\s+)?(can you\s+)?(could you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
-
     /^(please\s+)?(do you have|have you got|do you sell)\s+/i,
-
     /^(please\s+)?(i want|i need|i would like|i'm looking for|i am looking for|looking for)\s+(to\s+)?(see|view|browse|check)\s+/i,
-
     /^(please\s+)?(i want|i need|i would like|i am looking for|i'm looking for|looking for)\s+/i,
-
     /^(please\s+)?(what is the price of|what's the price of|how much is|how much does)\s+/i,
-
     /^(please\s+)?(buy|purchase|order)\s+/i,
-
     /^(please\s+)?(price of|availability of)\s+/i
   ];
 
@@ -1566,7 +1619,6 @@ async function showCategories(jid) {
 
     const result = await getCategories();
 
-    // Log the actual response to diagnose API shape issues.
     console.log(
       "Raw categories API response:",
       JSON.stringify(result).slice(0, 5000)
@@ -2023,12 +2075,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // DATABASE-FIRST STORE INVENTORY ROUTING
-  // ========================================
-
-  // These questions must NEVER be answered by Groq.
-  // They must retrieve the actual database categories.
 
   if (
     isCategoryBrowseRequest(text) ||
@@ -2782,6 +2829,9 @@ export async function startWhatsApp() {
 
     loadWelcomedCustomers();
 
+    // Show the correct Nigerian time when the bot starts.
+    logStoreClock();
+
     console.log(
       "Using WhatsApp authentication folder:",
       AUTH_FOLDER
@@ -2795,6 +2845,11 @@ export async function startWhatsApp() {
     console.log(
       "Founder display name:",
       STORE_OWNER_NAME
+    );
+
+    console.log(
+      "Configured store timezone:",
+      STORE_TIMEZONE
     );
 
     const { state, saveCreds } =
@@ -2874,6 +2929,9 @@ export async function startWhatsApp() {
           console.log(
             `${STORE_NAME} WhatsApp connected successfully.`
           );
+
+          // Log the time again after successful connection.
+          logStoreClock();
         }
 
         if (connection === "close") {
@@ -2977,12 +3035,9 @@ export async function startWhatsApp() {
               try {
                 if (!isConnected()) return;
 
-                // Send founder welcome only to first-time customers.
                 const firstWelcome =
                   await sendFounderWelcome(jid);
 
-                // The welcome already answers a first-time greeting.
-                // Do not suppress a customer's actual product question.
                 if (
                   firstWelcome &&
                   isGreetingOrAcknowledgement(text)
@@ -2990,7 +3045,6 @@ export async function startWhatsApp() {
                   return;
                 }
 
-                // Continue normal customer request processing.
                 await handleConversation(jid, text);
 
               } catch (error) {
