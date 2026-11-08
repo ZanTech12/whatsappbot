@@ -16,6 +16,7 @@ import path from "path";
 import {
   searchProducts,
   getCategories,
+  getProductDetails,
   createGuestOrder,
   getOrderStatus
 } from "./api.js";
@@ -106,7 +107,7 @@ function saveAIHistory(jid, question, answer) {
 }
 
 // ==========================================
-// AI SYSTEM INSTRUCTIONS
+// AI SYSTEM PROMPT
 // ==========================================
 
 function getAISystemPrompt() {
@@ -132,29 +133,52 @@ Happy Sunday, Happy Monday, Happy weekend and Greetings.
 Respond naturally and politely.
 
 BUSINESS RESPONSIBILITIES:
-You can help customers with:
-1. Solar panels.
-2. Solar inverters.
-3. Lithium batteries.
-4. Tubular batteries.
-5. Charge controllers.
-6. Solar installation.
-7. Solar system sizing.
-8. Electrical installations.
-9. Energy consumption calculations.
-10. General solar technology questions.
+Help customers with enquiries about the business,
+its services, solar technology, electrical systems,
+installations and general technical questions.
+
+LIVE PRODUCT INFORMATION:
+The actual product catalogue is stored in the
+ecommerce database.
+
+Product names, descriptions, prices, discounts,
+categories, brands, SKUs and stock quantities must
+come from the live ecommerce product API.
+
+You do not have permission to invent or assume
+the contents of the product catalogue.
+
+Never create imaginary product names.
+
+Never guess product prices or availability.
+
+Never claim that a product exists unless it has
+been returned by the product API.
+
+Never claim that you checked the inventory unless
+the application has called the product API.
+
+If a customer asks to search, purchase, browse,
+check the price or check availability of a product,
+the application will retrieve the actual products
+from the ecommerce database.
+
+If the live product information is unavailable,
+explain that you cannot check it at the moment.
 
 TECHNICAL GUIDANCE:
 Explain technical subjects in simple language.
 
-When calculating solar requirements, ask for relevant information:
+When calculating solar requirements, ask for relevant
+information:
 - Appliances they want to power.
 - Power ratings in watts.
 - Hours of usage.
 - Required backup duration.
 - Available budget, when relevant.
 
-Do not present estimates as guaranteed installation specifications.
+Do not present estimates as guaranteed installation
+specifications.
 
 IMPORTANT BUSINESS RULES:
 - Never invent product prices.
@@ -162,19 +186,13 @@ IMPORTANT BUSINESS RULES:
 - Never invent discounts.
 - Never invent delivery fees.
 - Never invent company contact information.
-- Never claim payment has been received without payment confirmation.
-- Never claim an order has been created without order API confirmation.
-- Never claim to have checked live products unless the product API was called.
+- Never claim payment has been received without
+  payment confirmation.
+- Never claim an order has been created without
+  order API confirmation.
 - Never invent company policies.
 - Never request passwords, OTPs or card details.
 - Do not expose private payment information.
-
-LIVE PRODUCT INFORMATION:
-Product prices, availability and stock must come from
-the actual product API, not from your own knowledge.
-
-If live product information is unavailable, explain
-that the information cannot currently be checked.
 
 PURCHASES:
 When customers want to purchase products, guide them
@@ -247,8 +265,38 @@ async function askCustomerAI(jid, question) {
 }
 
 // ==========================================
-// AI MESSAGE INTENT DETECTOR
+// MESSAGE INTENT DETECTION
 // ==========================================
+
+function fallbackIntent(message) {
+  const text = String(message || "").toLowerCase().trim();
+
+  if (
+    /^(hi|hello|hey|good morning|good afternoon|good evening|how far|how are you)[!. ]*$/.test(text)
+  ) {
+    return "GREETING";
+  }
+
+  if (
+    /\b(track|tracking|order status|where is my order)\b/i.test(text)
+  ) {
+    return "TRACKING";
+  }
+
+  if (
+    /\b(customer support|speak to someone|human agent|representative|complaint)\b/i.test(text)
+  ) {
+    return "SUPPORT";
+  }
+
+  if (
+    /\b(buy|purchase|order|checkout|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|browse products|list products)\b/i.test(text)
+  ) {
+    return "PRODUCT";
+  }
+
+  return "QUESTION";
+}
 
 async function detectMessageIntent(message) {
   try {
@@ -272,17 +320,43 @@ TRACKING
 SUPPORT
 QUESTION
 
-Rules:
-- Greeting alone: GREETING.
-- Explicit menu request: MENU.
-- Product search or purchase: PRODUCT.
-- Current product price or availability: PRODUCT.
-- Order tracking: TRACKING.
-- Customer service request: SUPPORT.
-- General solar knowledge question: QUESTION.
-- Greeting combined with a request follows the actual request.
-- "Good morning, I need an inverter" is PRODUCT.
-- "How do solar panels work?" is QUESTION.
+RULES:
+
+GREETING:
+A greeting without another request.
+
+MENU:
+The customer wants the main menu.
+
+PRODUCT:
+The customer wants to:
+- Find or search for a product.
+- Buy or purchase something.
+- Check whether an item is available.
+- Ask for a product price.
+- Browse the store catalogue.
+- Ask whether the store sells a particular item.
+- Select or compare products available in the store.
+
+TRACKING:
+The customer wants to track an existing order.
+
+SUPPORT:
+The customer wants human assistance or customer service.
+
+QUESTION:
+General questions, technical explanations and other
+questions that do not require a product catalogue search.
+
+IMPORTANT:
+- Do not assume any product exists.
+- Do not invent product names.
+- A request mentioning a specific product is PRODUCT
+  when the customer wants to find, buy or check it.
+- A technical explanation request is QUESTION.
+- "How does an inverter work?" is QUESTION.
+- "How much is an inverter?" is PRODUCT.
+- "Good morning, I need a product" is PRODUCT.
 - "How far?" alone is GREETING.
 
 Return ONLY one category name.
@@ -315,7 +389,9 @@ Return ONLY one category name.
       "QUESTION"
     ];
 
-    return allowed.includes(intent) ? intent : "QUESTION";
+    return allowed.includes(intent)
+      ? intent
+      : fallbackIntent(message);
 
   } catch (error) {
     console.error(
@@ -323,7 +399,7 @@ Return ONLY one category name.
       error.message
     );
 
-    return "QUESTION";
+    return fallbackIntent(message);
   }
 }
 
@@ -405,7 +481,7 @@ export function getCurrentQR() {
 function formatNaira(amount) {
   const numericAmount = Number(amount || 0);
 
-  return `\u20A6${Number.isFinite(numericAmount)
+  return `₦${Number.isFinite(numericAmount)
     ? numericAmount.toLocaleString("en-NG")
     : "0"}`;
 }
@@ -736,7 +812,7 @@ export async function sendWhatsAppNotification(
 }
 
 // ==========================================
-// PRODUCT RESPONSE HELPERS
+// PRODUCT API RESPONSE VALIDATION
 // ==========================================
 
 function getProducts(data) {
@@ -758,20 +834,18 @@ function getProducts(data) {
     typeof product === "object" &&
     !Array.isArray(product) &&
     product._id &&
-    product.name
+    typeof product.name === "string" &&
+    product.name.trim() &&
+    Number.isFinite(Number(product.price))
   );
 }
 
 function getCategoriesList(data) {
-  const raw =
-    Array.isArray(data)
-      ? data
-      : data?.categories ??
-        data?.data?.categories ??
-        data?.data ??
-        [];
-
-  if (!Array.isArray(raw)) {
+  if (
+    !data ||
+    data.success !== true ||
+    !Array.isArray(data.categories)
+  ) {
     console.error(
       "Invalid categories API response:",
       JSON.stringify(data).slice(0, 2000)
@@ -780,38 +854,31 @@ function getCategoriesList(data) {
     return [];
   }
 
-  const names = raw
-    .map(item => {
-      if (typeof item === "string") return item.trim();
-
-      if (item && typeof item === "object") {
-        return String(
-          item.name ||
-          item.category ||
-          item.title ||
-          ""
-        ).trim();
-      }
-
-      return "";
-    })
-    .filter(Boolean);
-
-  return [...new Set(names)];
+  return [
+    ...new Set(
+      data.categories
+        .filter(item => typeof item === "string")
+        .map(item => item.trim())
+        .filter(Boolean)
+    )
+  ];
 }
 
-function productPrice(product) {
-  const discount = Number(product.discountPrice || 0);
-  const price = Number(product.price || 0);
+// Your backend returns the effective selling price in
+// product.price and the original price in originalPrice.
 
-  return (
-    Number.isFinite(discount) &&
-    Number.isFinite(price) &&
-    discount > 0 &&
-    discount < price
-  )
-    ? discount
-    : price;
+function productPrice(product) {
+  const price = Number(product.price);
+
+  return Number.isFinite(price) ? price : 0;
+}
+
+function productOriginalPrice(product) {
+  const originalPrice = Number(product.originalPrice);
+
+  return Number.isFinite(originalPrice)
+    ? originalPrice
+    : productPrice(product);
 }
 
 // ==========================================
@@ -820,15 +887,15 @@ function productPrice(product) {
 
 function extractProductSearchTerm(message = "") {
   let search = String(message || "")
-    .toLowerCase()
     .trim()
     .replace(/[?!.,]/g, " ");
 
   const prefixes = [
-    /^(please\s+)?(can you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
-    /^(please\s+)?(do you have|have you got)\s+/i,
-    /^(please\s+)?(i want|i need|i am looking for|i'm looking for|looking for)\s+/i,
-    /^(please\s+)?(what is the price of|how much is|how much does)\s+/i
+    /^(please\s+)?(can you\s+)?(could you\s+)?(show|find|search|list|get|display)\s+(me\s+)?/i,
+    /^(please\s+)?(do you have|have you got|do you sell)\s+/i,
+    /^(please\s+)?(i want|i need|i would like|i am looking for|i'm looking for|looking for)\s+/i,
+    /^(please\s+)?(what is the price of|what's the price of|how much is|how much does)\s+/i,
+    /^(please\s+)?(buy|purchase|order)\s+/i
   ];
 
   for (const prefix of prefixes) {
@@ -837,50 +904,37 @@ function extractProductSearchTerm(message = "") {
 
   search = search
     .replace(
-      /\b(available|availability|in stock|please|for sale)\b/gi,
+      /\b(please|available|availability|in stock|for sale|price|prices|cost|product|products)\b/gi,
       " "
     )
     .replace(/\s+/g, " ")
     .trim();
 
+  const genericRequests = [
+    "all",
+    "everything",
+    "all products",
+    "all items",
+    "what do you have",
+    "what is available",
+    "what's available",
+    "show me everything",
+    "show everything",
+    "browse",
+    "browse all"
+  ];
+
+  if (
+    genericRequests.includes(search.toLowerCase())
+  ) {
+    return "";
+  }
+
   return search;
 }
 
 // ==========================================
-// PRODUCT SEARCH DETECTION
-// ==========================================
-
-function isProductSearchMessage(message) {
-  const text = String(message || "")
-    .toLowerCase()
-    .trim();
-
-  if (!text) return false;
-
-  const technicalQuestion =
-    /\b(how does|how do|how can|how to|what is|what are|why does|why do|explain|calculate|difference between|work|works|working|function|functions|operate|operates|operating|install|installation|sizing)\b/i;
-
-  const purchaseIntent =
-    /\b(buy|purchase|order|checkout|i want|i need|looking for|show me|find me|search for|do you have|have you got|available|availability|in stock|price|prices|cost|how much|list products|browse products)\b/i;
-
-  const productTerms =
-    /\b(inverter|inverters|battery|batteries|lithium|tubular|solar panel|solar panels|panel|panels|charge controller|controller|controllers|solar light|solar lights|cable|cables|wire|wires|breaker|breakers|generator|generators|ups|kva|kw|watt|watts|product|products)\b/i;
-
-  const hasProduct = productTerms.test(text);
-  const hasPurchaseIntent = purchaseIntent.test(text);
-
-  if (
-    technicalQuestion.test(text) &&
-    !hasPurchaseIntent
-  ) {
-    return false;
-  }
-
-  return hasPurchaseIntent || hasProduct;
-}
-
-// ==========================================
-// BROWSE ALL PRODUCTS / SEARCH PRODUCTS
+// FETCH AND DISPLAY PRODUCTS
 // ==========================================
 
 async function showProducts(
@@ -900,10 +954,11 @@ async function showProducts(
   conversations.set(jid, state);
 
   try {
-    console.log("Fetching products from backend:", {
+    console.log("Fetching products from ecommerce backend:", {
       search: searchTerm,
       category,
-      page
+      page,
+      limit: PRODUCTS_PER_PAGE
     });
 
     const result = await searchProducts(
@@ -913,13 +968,21 @@ async function showProducts(
       category
     );
 
+    if (!result || result.success !== true) {
+      throw new Error(
+        result?.message || "Product API request failed."
+      );
+    }
+
     const products = getProducts(result);
 
     console.log(
-      "Products returned by backend:",
+      "Actual MongoDB products returned:",
       products.map(product => ({
         id: String(product._id),
         name: product.name,
+        category: product.category,
+        brand: product.brand,
         sku: product.sku,
         price: product.price,
         stock: product.countInStock
@@ -935,41 +998,28 @@ async function showProducts(
       await sendText(
         jid,
         searchTerm
-          ? `I couldn't find "${searchTerm}" in our product database. Try another product name.`
+          ? `I couldn't find "${searchTerm}" in our product database. Please try another search term or browse our categories.`
           : category
-            ? `There are currently no products listed under *${category}*.`
+            ? `There are currently no active products listed under *${category}*.`
             : "There are currently no active products available in our store."
       );
 
       return;
     }
 
-    const available = products
-      .filter(product =>
-        product._id &&
-        product.name &&
-        Number.isFinite(Number(product.price))
-      );
+    const currentPage = Math.max(
+      1,
+      Number(result.page) || page
+    );
 
-    if (!available.length) {
-      state.products = [];
-      state.stage = "browse_empty";
+    const totalPages = Math.max(
+      1,
+      Number(result.pages) || 1
+    );
 
-      conversations.set(jid, state);
+    const total = Number(result.total) || products.length;
 
-      await sendText(
-        jid,
-        "No valid products were returned by our product database."
-      );
-
-      return;
-    }
-
-    const currentPage = Number(result.page || page);
-    const totalPages = Number(result.pages || 1);
-    const total = Number(result.total || available.length);
-
-    state.products = available;
+    state.products = products;
     state.stage = "select_product";
     state.currentPage = currentPage;
     state.totalPages = totalPages;
@@ -991,14 +1041,32 @@ async function showProducts(
 
     response +=
       `Showing page ${currentPage} of ${totalPages}\n` +
-      `Total products: ${total}\n\n`;
+      `Total matching products: ${total}\n\n`;
 
-    available.forEach((product, index) => {
+    products.forEach((product, index) => {
       const stock = Number(product.countInStock || 0);
+
+      const price = productPrice(product);
+      const originalPrice = productOriginalPrice(product);
 
       response +=
         `*${index + 1}. ${product.name}*\n` +
-        `Price: ${formatNaira(productPrice(product))}\n` +
+        `Price: ${formatNaira(price)}\n`;
+
+      if (originalPrice > price) {
+        response +=
+          `Original price: ${formatNaira(originalPrice)}\n`;
+      }
+
+      if (product.brand) {
+        response += `Brand: ${product.brand}\n`;
+      }
+
+      if (product.category) {
+        response += `Category: ${product.category}\n`;
+      }
+
+      response +=
         `Stock: ${stock > 0 ? stock : "Out of stock"}\n`;
 
       if (product.sku) {
@@ -1016,7 +1084,7 @@ async function showProducts(
     }
 
     if (currentPage > 1) {
-      response += "Type *PREV* to go to the previous page.\n";
+      response += "Type *PREV* to see the previous page.\n";
     }
 
     response += "\nType MENU to return to the main menu.";
@@ -1036,7 +1104,7 @@ async function showProducts(
 
     await sendText(
       jid,
-      "Sorry, I cannot retrieve products at the moment. Please try again shortly."
+      "Sorry, I cannot retrieve products from our store database at the moment. Please try again shortly."
     );
   }
 }
@@ -1054,13 +1122,22 @@ async function showCategories(jid) {
   conversations.set(jid, state);
 
   try {
-    console.log("Fetching product categories from backend.");
+    console.log("Fetching categories from ecommerce backend.");
 
     const result = await getCategories();
 
+    if (!result || result.success !== true) {
+      throw new Error(
+        result?.message || "Category API request failed."
+      );
+    }
+
     const categories = getCategoriesList(result);
 
-    console.log("Categories returned by backend:", categories);
+    console.log(
+      "Actual MongoDB product categories:",
+      categories
+    );
 
     if (!categories.length) {
       state.stage = "browse_empty";
@@ -1070,7 +1147,7 @@ async function showCategories(jid) {
 
       await sendText(
         jid,
-        "There are currently no product categories available. You can choose Browse All Products from the main menu instead."
+        "There are currently no active product categories available. You can browse all products from the main menu."
       );
 
       return;
@@ -1086,7 +1163,7 @@ async function showCategories(jid) {
       "Choose a category:\n\n";
 
     categories.forEach((category, index) => {
-      response += `${index + 1}️⃣ ${category}\n`;
+      response += `${index + 1}. ${category}\n`;
     });
 
     response +=
@@ -1108,9 +1185,29 @@ async function showCategories(jid) {
 
     await sendText(
       jid,
-      "Sorry, I couldn't retrieve product categories right now. Please try again shortly."
+      "Sorry, I couldn't retrieve product categories from our store database right now. Please try again shortly."
     );
   }
+}
+
+// ==========================================
+// REFRESH PRODUCT DETAILS BEFORE SELECTION
+// ==========================================
+
+async function getFreshProduct(productId) {
+  const result = await getProductDetails(productId);
+
+  if (
+    !result ||
+    result.success !== true ||
+    !result.product ||
+    !result.product._id ||
+    !result.product.name
+  ) {
+    throw new Error("This product is no longer available.");
+  }
+
+  return result.product;
 }
 
 // ==========================================
@@ -1154,7 +1251,7 @@ async function createOrderFromConversation(jid, state) {
     };
 
     console.log(
-      "Submitting WhatsApp order to Vercel:",
+      "Submitting WhatsApp order to ecommerce backend:",
       {
         productId: state.product._id,
         quantity: state.quantity,
@@ -1176,6 +1273,7 @@ async function createOrderFromConversation(jid, state) {
     }
 
     const order = result.order;
+
     const totalAmount = Number(order.totalAmount || 0);
 
     await sendText(
@@ -1226,8 +1324,8 @@ async function showMainMenu(jid) {
     `3️⃣ Browse by category\n` +
     `4️⃣ Track an order\n` +
     `5️⃣ Customer support\n\n` +
-    `You can also ask me questions about solar energy, ` +
-    `inverters, batteries and electrical products.\n\n` +
+    `You can also ask questions about our products, ` +
+    `solar energy, electrical systems and installations.\n\n` +
     `We're happy to help! 😊`
   );
 }
@@ -1365,50 +1463,76 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    const product = state.products[index];
+    const selectedProduct = state.products[index];
 
-    if (Number(product.countInStock || 0) < 1) {
+    try {
+      // Retrieve the latest product information from MongoDB.
+      const product = await getFreshProduct(
+        selectedProduct._id
+      );
+
+      if (Number(product.countInStock || 0) < 1) {
+        await sendText(
+          jid,
+          `Sorry, *${product.name}* is currently out of stock. Please select another product.`
+        );
+
+        return;
+      }
+
+      state.product = product;
+      state.stage = "quantity";
+
+      conversations.set(jid, state);
+
       await sendText(
         jid,
-        "Sorry, this product is out of stock. Please select another product."
+        `You selected *${product.name}*.\n\n` +
+        `Price: ${formatNaira(productPrice(product))}\n` +
+        `Available stock: ${product.countInStock}\n\n` +
+        `How many would you like?`
+      );
+
+    } catch (error) {
+      console.error(
+        "Product details error:",
+        error.message
+      );
+
+      await sendText(
+        jid,
+        "Sorry, I couldn't verify this product. Please return to the product list and select another item."
+      );
+    }
+
+    return;
+  }
+
+  // ========================================
+  // ACTIVE SEARCH STAGE
+  // ========================================
+
+  if (state.stage === "search") {
+    if (text.trim().length < 2) {
+      await sendText(
+        jid,
+        "Please enter at least two characters of the product name, brand, SKU or category."
       );
 
       return;
     }
 
-    state.product = product;
-    state.stage = "quantity";
-
-    conversations.set(jid, state);
-
-    await sendText(
+    await showProducts(
       jid,
-      `You selected *${product.name}*.\n\n` +
-      `Price: ${formatNaira(productPrice(product))}\n` +
-      `Available stock: ${product.countInStock}\n\n` +
-      `How many would you like?`
+      extractProductSearchTerm(text) || text
     );
 
     return;
   }
 
   // ========================================
-  // ACTIVE TRANSACTION STAGES
+  // QUANTITY
   // ========================================
-
-  if (state.stage === "search") {
-    if (normalized.length < 2) {
-      await sendText(
-        jid,
-        "Please enter a product name or category."
-      );
-
-      return;
-    }
-
-    await showProducts(jid, text);
-    return;
-  }
 
   if (state.stage === "quantity") {
     const quantity = Number(text);
@@ -1436,6 +1560,10 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // CUSTOMER NAME
+  // ========================================
+
   if (state.stage === "full_name") {
     if (text.length < 3 || text.length > 100) {
       await sendText(jid, "Please enter your full name.");
@@ -1455,6 +1583,10 @@ async function handleConversation(jid, text) {
 
     return;
   }
+
+  // ========================================
+  // CUSTOMER PHONE
+  // ========================================
 
   if (state.stage === "phone") {
     const phone = normalizePhone(text);
@@ -1487,6 +1619,10 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // DELIVERY ADDRESS
+  // ========================================
+
   if (state.stage === "address") {
     if (text.length < 5) {
       await sendText(
@@ -1506,6 +1642,10 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // CITY
+  // ========================================
+
   if (state.stage === "city") {
     if (text.length < 2 || text.length > 100) {
       await sendText(jid, "Please enter a valid city or town.");
@@ -1520,6 +1660,10 @@ async function handleConversation(jid, text) {
     await sendText(jid, "Which state in Nigeria?");
     return;
   }
+
+  // ========================================
+  // STATE
+  // ========================================
 
   if (state.stage === "state") {
     if (text.length < 2 || text.length > 100) {
@@ -1539,6 +1683,10 @@ async function handleConversation(jid, text) {
 
     return;
   }
+
+  // ========================================
+  // POSTCODE AND ORDER SUBMISSION
+  // ========================================
 
   if (state.stage === "zipCode") {
     if (text.trim().length < 2 || text.trim().length > 20) {
@@ -1563,6 +1711,10 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // ORDER NUMBER
+  // ========================================
+
   if (state.stage === "order_number") {
     if (text.trim().length < 2) {
       await sendText(jid, "Please enter a valid order number.");
@@ -1582,6 +1734,10 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // ORDER TRACKING
+  // ========================================
+
   if (state.stage === "order_phone") {
     try {
       const phone = normalizePhone(text);
@@ -1595,6 +1751,12 @@ async function handleConversation(jid, text) {
         state.orderNumber,
         phone
       );
+
+      if (!result || result.success !== true) {
+        throw new Error(
+          result?.message || "Order lookup failed."
+        );
+      }
 
       const order =
         result.order ||
@@ -1641,10 +1803,14 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // CUSTOMER SUPPORT
+  // ========================================
+
   if (state.stage === "support") {
     await sendText(
       jid,
-      "Thank you for contacting Divine Solar Hub. Your message has been received. Please contact our sales team for further assistance."
+      "Thank you for contacting Divine Solar Hub. Your message has been received. Please contact our sales representative for further assistance."
     );
 
     conversations.delete(jid);
@@ -1652,7 +1818,7 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // MENU SHORTCUTS
+  // MAIN MENU SHORTCUTS
   // ========================================
 
   if (
@@ -1662,7 +1828,7 @@ async function handleConversation(jid, text) {
 
     await sendText(
       jid,
-      "What product are you looking for?\n\nEnter a product name or category."
+      "What product are you looking for?\n\nEnter a product name, brand, SKU or category."
     );
 
     return;
@@ -1705,21 +1871,14 @@ async function handleConversation(jid, text) {
   }
 
   // ========================================
-  // DIRECT PRODUCT SEARCH BEFORE GROQ
-  // ========================================
-
-  if (isProductSearchMessage(text)) {
-    const searchTerm = extractProductSearchTerm(text);
-
-    await showProducts(jid, searchTerm);
-    return;
-  }
-
-  // ========================================
-  // GROQ FOR GREETINGS AND GENERAL QUESTIONS
+  // GROQ INTENT DETECTION
   // ========================================
 
   const intent = await detectMessageIntent(text);
+
+  // ========================================
+  // GREETING
+  // ========================================
 
   if (intent === "GREETING") {
     const aiResponse = await askCustomerAI(jid, text);
@@ -1730,11 +1889,19 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // MENU
+  // ========================================
+
   if (intent === "MENU") {
     clearAIHistory(jid);
     await showMainMenu(jid);
     return;
   }
+
+  // ========================================
+  // PRODUCT SEARCH
+  // ========================================
 
   if (intent === "PRODUCT") {
     const searchTerm = extractProductSearchTerm(text);
@@ -1743,12 +1910,20 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // ORDER TRACKING
+  // ========================================
+
   if (intent === "TRACKING") {
     conversations.set(jid, { stage: "order_number" });
 
     await sendText(jid, "Please enter your order number.");
     return;
   }
+
+  // ========================================
+  // SUPPORT
+  // ========================================
 
   if (intent === "SUPPORT") {
     conversations.set(jid, { stage: "support" });
@@ -1760,6 +1935,10 @@ async function handleConversation(jid, text) {
 
     return;
   }
+
+  // ========================================
+  // GENERAL QUESTIONS - GROQ
+  // ========================================
 
   const aiResponse = await askCustomerAI(jid, text);
 
@@ -1979,7 +2158,7 @@ export async function startWhatsApp() {
           }
 
           console.log(
-            "Divine Solar Hub WhatsApp connected successfully."
+            `${STORE_NAME} WhatsApp connected successfully.`
           );
         }
 
