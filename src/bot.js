@@ -34,6 +34,17 @@ const AUTH_FOLDER = path.resolve(
 const STORE_NAME =
   process.env.STORE_NAME || "Divine Solar Hub";
 
+const STORE_OWNER_NAME =
+  process.env.STORE_OWNER_NAME ||
+  "Vincent Edochie Mmadukolu";
+
+const STORE_OWNER_IMAGE = path.resolve(
+  process.env.STORE_OWNER_IMAGE || "./founder.jpeg"
+);
+
+const STORE_TIMEZONE =
+  process.env.STORE_TIMEZONE || "Africa/Lagos";
+
 const GROQ_MODEL =
   process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
@@ -50,6 +61,312 @@ const DEDUPE_TTL_MS = 10 * 60 * 1000;
 const MAX_DEDUPE_ENTRIES = 5000;
 
 const PRODUCTS_PER_PAGE = 8;
+
+// ==========================================
+// PERSISTENT CUSTOMER WELCOME REGISTRY
+// ==========================================
+
+const WELCOME_REGISTRY_FILE = path.join(
+  AUTH_FOLDER,
+  "welcomed_customers.json"
+);
+
+let welcomedCustomers = new Set();
+
+function loadWelcomedCustomers() {
+  try {
+    fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+
+    if (!fs.existsSync(WELCOME_REGISTRY_FILE)) {
+      welcomedCustomers = new Set();
+      return;
+    }
+
+    const content = fs.readFileSync(
+      WELCOME_REGISTRY_FILE,
+      "utf8"
+    );
+
+    const saved = JSON.parse(content);
+
+    welcomedCustomers = new Set(
+      Array.isArray(saved)
+        ? saved.filter(item => typeof item === "string")
+        : []
+    );
+
+    console.log(
+      `Loaded ${welcomedCustomers.size} previously welcomed customers.`
+    );
+
+  } catch (error) {
+    console.error(
+      "Welcome registry loading error:",
+      error.message
+    );
+
+    welcomedCustomers = new Set();
+  }
+}
+
+function saveWelcomedCustomers() {
+  try {
+    fs.mkdirSync(AUTH_FOLDER, { recursive: true });
+
+    const temporaryFile =
+      `${WELCOME_REGISTRY_FILE}.tmp`;
+
+    fs.writeFileSync(
+      temporaryFile,
+      JSON.stringify([...welcomedCustomers], null, 2),
+      "utf8"
+    );
+
+    fs.renameSync(
+      temporaryFile,
+      WELCOME_REGISTRY_FILE
+    );
+
+  } catch (error) {
+    console.error(
+      "Welcome registry saving error:",
+      error.message
+    );
+  }
+}
+
+// ==========================================
+// NIGERIA DATE AND TIME
+// ==========================================
+
+function getStoreDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: STORE_TIMEZONE,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    hourCycle: "h23"
+  }).formatToParts(date);
+
+  const result = {};
+
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      result[part.type] = Number(part.value);
+    }
+  }
+
+  return result;
+}
+
+function getTimeGreeting() {
+  const { hour } = getStoreDateParts();
+
+  if (hour >= 5 && hour < 12) {
+    return "Good morning";
+  }
+
+  if (hour >= 12 && hour < 17) {
+    return "Good afternoon";
+  }
+
+  return "Good evening";
+}
+
+// ==========================================
+// EASTER DATE CALCULATION
+// ==========================================
+
+function getEasterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+
+  const h =
+    (19 * a + b - d - g + 15) % 30;
+
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+
+  const l =
+    (32 + 2 * e + 2 * i - h - k) % 7;
+
+  const m =
+    Math.floor((a + 11 * h + 22 * l) / 451);
+
+  const month =
+    Math.floor((h + l - 7 * m + 114) / 31);
+
+  const day =
+    ((h + l - 7 * m + 114) % 31) + 1;
+
+  return { month, day };
+}
+
+function getEasterOccasion(year, month, day) {
+  const easter = getEasterSunday(year);
+
+  const easterDate = new Date(
+    Date.UTC(year, easter.month - 1, easter.day)
+  );
+
+  const currentDate = new Date(
+    Date.UTC(year, month - 1, day)
+  );
+
+  const difference = Math.round(
+    (currentDate.getTime() - easterDate.getTime()) /
+    86400000
+  );
+
+  const occasions = {
+    "-2": {
+      title: "Good Friday",
+      message:
+        "We wish you a peaceful and reflective Good Friday."
+    },
+
+    "-1": {
+      title: "Easter Saturday",
+      message:
+        "Wishing you a peaceful and beautiful Easter celebration."
+    },
+
+    "0": {
+      title: "Easter Sunday",
+      message:
+        "Happy Easter! May this season bring you renewed hope, joy and blessings."
+    },
+
+    "1": {
+      title: "Easter Monday",
+      message:
+        "Happy Easter Monday! May the joy of this season remain with you."
+    }
+  };
+
+  return occasions[String(difference)] || null;
+}
+
+// ==========================================
+// SPECIAL OCCASIONS
+// ==========================================
+
+function getSpecialOccasion() {
+  const { year, month, day } = getStoreDateParts();
+
+  const easter = getEasterOccasion(
+    year,
+    month,
+    day
+  );
+
+  if (easter) return easter;
+
+  const occasions = {
+    "1-1": {
+      title: "New Year",
+      message:
+        "Happy New Year! We wish you success, happiness and a brighter year ahead."
+    },
+
+    "2-14": {
+      title: "Valentine's Day",
+      message:
+        "Happy Valentine's Day! Wishing you love, happiness and wonderful moments."
+    },
+
+    "3-8": {
+      title: "International Women's Day",
+      message:
+        "Happy International Women's Day! Today we celebrate the achievements and contributions of women."
+    },
+
+    "5-1": {
+      title: "Workers' Day",
+      message:
+        "Happy Workers' Day! We celebrate your dedication, effort and hard work."
+    },
+
+    "5-27": {
+      title: "Children's Day",
+      message:
+        "Happy Children's Day! Wishing every child a bright and promising future."
+    },
+
+    "6-12": {
+      title: "Democracy Day",
+      message:
+        "Happy Democracy Day, Nigeria! Wishing our nation peace, progress and unity."
+    },
+
+    "10-1": {
+      title: "Nigeria Independence Day",
+      message:
+        "Happy Independence Day, Nigeria! May our great nation continue to grow in peace and prosperity."
+    },
+
+    "12-24": {
+      title: "Christmas Season",
+      message:
+        "Merry Christmas! May this festive season bring joy, peace and happiness to you and your family."
+    },
+
+    "12-25": {
+      title: "Christmas Day",
+      message:
+        "Merry Christmas! We wish you and your family love, peace, happiness and blessings."
+    },
+
+    "12-26": {
+      title: "Boxing Day",
+      message:
+        "Happy Boxing Day! We hope you are enjoying a wonderful festive season."
+    },
+
+    "12-31": {
+      title: "New Year's Eve",
+      message:
+        "Thank you for being part of our journey this year. We wish you an amazing year ahead!"
+    }
+  };
+
+  return occasions[`${month}-${day}`] || null;
+}
+
+// ==========================================
+// FOUNDER WELCOME CAPTION
+// ==========================================
+
+function getFounderWelcomeMessage() {
+  const greeting = getTimeGreeting();
+  const occasion = getSpecialOccasion();
+
+  let message =
+    `${greeting}! 👋\n\n` +
+    `Welcome to *${STORE_NAME}*! ☀️\n\n`;
+
+  if (occasion) {
+    message +=
+      `🎉 *${occasion.title}*\n` +
+      `${occasion.message}\n\n`;
+  }
+
+  message +=
+    `Thank you for choosing us. We're delighted to have you here.\n\n` +
+    `I'm *${STORE_OWNER_NAME}*, and we appreciate your interest in ${STORE_NAME}.\n\n` +
+    `We are here to help you find quality solar energy products and electrical solutions for your needs.\n\n` +
+    `How may we assist you today? 😊`;
+
+  return message;
+}
 
 // ==========================================
 // GROQ AI
@@ -125,16 +442,18 @@ PERSONALITY:
 - Understand Nigerian English and informal expressions.
 - Be patient and helpful.
 - Do not sound like a robot.
-- Do not repeat the same greeting unnecessarily.
+- Do not repeat greetings unnecessarily.
 
 YOUR RESPONSIBILITIES:
 
 1. CUSTOMER SERVICE
+
 Answer customer questions about the store, products,
 solar energy, electrical systems, installations,
 renewable energy and related topics.
 
 2. PRODUCT ENQUIRIES
+
 Help customers explain what they need.
 
 If a customer says:
@@ -153,23 +472,16 @@ help identify the type of products they may need.
 
 3. LIVE PRODUCT DATABASE
 
-The application has access to the real store catalogue.
-
 Product names, prices, discounts, brands, descriptions,
 categories, SKUs and stock quantities must come from
 the actual ecommerce database.
 
-Never invent products.
-
-Never invent prices.
+Never invent products, prices or stock.
 
 Never claim a product is available unless the application
 has checked the actual product API.
 
 Never pretend that you have checked the database.
-
-If the customer asks for a product, the application
-will search the actual product API.
 
 4. TECHNICAL QUESTIONS
 
@@ -277,7 +589,6 @@ function normalizeMessage(message) {
 
 // ==========================================
 // CATEGORY BROWSING DETECTION
-// IMPORTANT: RUN BEFORE PRODUCT SEARCH
 // ==========================================
 
 function isCategoryBrowseRequest(message) {
@@ -308,7 +619,11 @@ function isCategoryBrowseRequest(message) {
     /\btypes of products (available|do you have)\b/,
     /\bwhat types of products\b/,
     /\bi want to explore your products\b/,
-    /\bi want to browse your products\b/
+    /\bi want to browse your products\b/,
+    /\bthe products available here\b/,
+    /\bshow me your products and categories\b/,
+    /\bi want to see the products here\b/,
+    /\bwhat is available in your store\b/
   ];
 
   return patterns.some(pattern => pattern.test(text));
@@ -334,7 +649,9 @@ function isCatalogBrowseRequest(message) {
     /\bproduct catalog(ue)\b/,
     /\bshow me everything\b/,
     /\bshow everything in the store\b/,
-    /\bi want to see all products\b/
+    /\bi want to see all products\b/,
+    /\bshow me all the items\b/,
+    /\bsee everything you have\b/
   ];
 
   return patterns.some(pattern => pattern.test(text));
@@ -792,6 +1109,117 @@ function sendDocument(jid, document) {
 }
 
 // ==========================================
+// FOUNDER WELCOME SENDER
+// ==========================================
+
+async function sendFounderWelcome(jid) {
+  if (welcomedCustomers.has(jid)) {
+    return false;
+  }
+
+  const caption = getFounderWelcomeMessage();
+
+  try {
+    if (!fs.existsSync(STORE_OWNER_IMAGE)) {
+      throw new Error(
+        `Founder image not found: ${STORE_OWNER_IMAGE}`
+      );
+    }
+
+    const imageStats = await fs.promises.stat(
+      STORE_OWNER_IMAGE
+    );
+
+    if (!imageStats.isFile() || imageStats.size === 0) {
+      throw new Error("Founder image is invalid or empty.");
+    }
+
+    if (imageStats.size > 10 * 1024 * 1024) {
+      throw new Error("Founder image exceeds the 10MB limit.");
+    }
+
+    if (!isConnected()) {
+      throw new Error("WhatsApp is disconnected.");
+    }
+
+    const imageBuffer = await fs.promises.readFile(
+      STORE_OWNER_IMAGE
+    );
+
+    const previousTask =
+      sendQueues.get(jid) || Promise.resolve();
+
+    const currentTask = previousTask
+      .catch(() => {})
+      .then(async () => {
+        if (!isConnected()) {
+          throw new Error("WhatsApp is disconnected.");
+        }
+
+        try {
+          await sock.sendPresenceUpdate("composing", jid);
+        } catch (error) {}
+
+        await sleep(1000);
+
+        await sock.sendMessage(jid, {
+          image: imageBuffer,
+          caption
+        });
+
+        lastMessageSent.set(jid, Date.now());
+      });
+
+    sendQueues.set(jid, currentTask);
+
+    try {
+      await currentTask;
+    } finally {
+      if (sendQueues.get(jid) === currentTask) {
+        sendQueues.delete(jid);
+      }
+    }
+
+    welcomedCustomers.add(jid);
+    saveWelcomedCustomers();
+
+    console.log(
+      "Founder welcome photo sent successfully."
+    );
+
+    return true;
+
+  } catch (error) {
+    console.error(
+      "Founder welcome photo error:",
+      error.message
+    );
+
+    // Text fallback if the image cannot be sent.
+    try {
+      await sendText(jid, caption);
+
+      welcomedCustomers.add(jid);
+      saveWelcomedCustomers();
+
+      console.log(
+        "Founder welcome sent as text fallback."
+      );
+
+      return true;
+
+    } catch (textError) {
+      console.error(
+        "Founder text welcome failed:",
+        textError.message
+      );
+
+      return false;
+    }
+  }
+}
+
+// ==========================================
 // DUPLICATE MESSAGE PROTECTION
 // ==========================================
 
@@ -1004,8 +1432,6 @@ function getProducts(data) {
   );
 }
 
-// Supports categories returned as strings or objects.
-// Category names still come exclusively from the API.
 function getCategoriesList(data) {
   if (
     !data ||
@@ -1061,7 +1487,7 @@ function productOriginalPrice(product) {
 }
 
 // ==========================================
-// BROWSE CATEGORIES FROM MONGODB
+// BROWSE CATEGORIES FROM DATABASE
 // ==========================================
 
 async function showCategories(jid) {
@@ -1073,7 +1499,7 @@ async function showCategories(jid) {
   conversations.set(jid, state);
 
   try {
-    console.log("Fetching ALL categories from MongoDB API.");
+    console.log("Fetching categories from ecommerce database.");
 
     const result = await getCategories();
 
@@ -1085,10 +1511,7 @@ async function showCategories(jid) {
 
     const categories = getCategoriesList(result);
 
-    console.log(
-      "Categories received from database:",
-      categories
-    );
+    console.log("Categories received:", categories);
 
     if (!categories.length) {
       state.stage = "browse_empty";
@@ -1141,7 +1564,7 @@ async function showCategories(jid) {
 }
 
 // ==========================================
-// DISPLAY PRODUCTS FROM MONGODB
+// DISPLAY PRODUCTS FROM DATABASE
 // ==========================================
 
 async function showProducts(
@@ -1161,7 +1584,7 @@ async function showProducts(
   conversations.set(jid, state);
 
   try {
-    console.log("Fetching products from ecommerce backend:", {
+    console.log("Fetching products:", {
       search: searchTerm,
       category,
       page,
@@ -1184,7 +1607,7 @@ async function showProducts(
     const products = getProducts(result);
 
     console.log(
-      "MongoDB products returned:",
+      "Database products returned:",
       products.map(product => ({
         id: String(product._id),
         name: product.name,
@@ -1461,10 +1884,20 @@ async function createOrderFromConversation(jid, state) {
 async function showMainMenu(jid) {
   conversations.set(jid, {});
 
-  await sendText(
-    jid,
-    `Welcome to *${STORE_NAME}*! ☀️\n\n` +
-    `Thank you for contacting us.\n\n` +
+  const greeting = getTimeGreeting();
+  const occasion = getSpecialOccasion();
+
+  let message =
+    `${greeting}! 👋\n\n` +
+    `Welcome to *${STORE_NAME}*! ☀️\n\n`;
+
+  if (occasion) {
+    message +=
+      `🎉 *${occasion.title}*\n` +
+      `${occasion.message}\n\n`;
+  }
+
+  message +=
     `How can we assist you today?\n\n` +
     `1️⃣ Search for a product\n` +
     `2️⃣ Browse all products\n` +
@@ -1473,10 +1906,11 @@ async function showMainMenu(jid) {
     `5️⃣ Customer support\n\n` +
     `You can also ask questions about solar energy, ` +
     `electrical systems, installations and our products.\n\n` +
-    `You can type your request naturally. For example:\n` +
+    `For example:\n` +
     `"I need a solar system for my house."\n\n` +
-    `We're happy to help! 😊`
-  );
+    `We're happy to help! 😊`;
+
+  await sendText(jid, message);
 }
 
 // ==========================================
@@ -1488,9 +1922,7 @@ async function handleConversation(jid, text) {
 
   let state = conversations.get(jid) || {};
 
-  // ========================================
   // GLOBAL MENU COMMAND
-  // ========================================
 
   if (
     ["menu", "start", "main menu", "home"].includes(normalized)
@@ -1500,9 +1932,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // STOP CURRENT CONVERSATION
-  // ========================================
 
   if (
     ["stop", "cancel", "exit"].includes(normalized)
@@ -1518,33 +1948,25 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
-  // GLOBAL CATEGORY REQUEST
-  // MUST RUN BEFORE PRODUCT SEARCH AND
-  // BEFORE CONVERSATION STAGE HANDLING
-  // ========================================
+  // CATEGORY REQUEST
 
   if (isCategoryBrowseRequest(text)) {
-    console.log("Customer requested database categories:", text);
+    console.log("Customer requested categories:", text);
 
     await showCategories(jid);
     return;
   }
 
-  // ========================================
-  // GLOBAL FULL CATALOGUE REQUEST
-  // ========================================
+  // FULL CATALOGUE REQUEST
 
   if (isCatalogBrowseRequest(text)) {
-    console.log("Customer requested complete catalogue:", text);
+    console.log("Customer requested full catalogue:", text);
 
     await showProducts(jid, "");
     return;
   }
 
-  // ========================================
   // CATEGORY SELECTION
-  // ========================================
 
   if (state.stage === "select_category") {
     const index = Number(text) - 1;
@@ -1582,8 +2004,6 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    // Allow customer to search for a different product
-    // instead of forcing a category number.
     if (text.trim().length >= 2) {
       await showProducts(
         jid,
@@ -1601,9 +2021,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // PRODUCT PAGINATION AND SELECTION
-  // ========================================
 
   if (state.stage === "select_product") {
     if (
@@ -1657,7 +2075,6 @@ async function handleConversation(jid, text) {
       index < 0 ||
       index >= state.products.length
     ) {
-      // Allow a new product search while browsing.
       if (isExplicitProductRequest(text)) {
         await showProducts(
           jid,
@@ -1716,9 +2133,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // ACTIVE SEARCH STAGE
-  // ========================================
 
   if (state.stage === "search") {
     if (text.trim().length < 2) {
@@ -1738,9 +2153,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // QUANTITY
-  // ========================================
 
   if (state.stage === "quantity") {
     const quantity = Number(text);
@@ -1768,9 +2181,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // CUSTOMER NAME
-  // ========================================
 
   if (state.stage === "full_name") {
     if (text.length < 3 || text.length > 100) {
@@ -1792,9 +2203,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // CUSTOMER PHONE
-  // ========================================
 
   if (state.stage === "phone") {
     const phone = normalizePhone(text);
@@ -1827,9 +2236,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // DELIVERY ADDRESS
-  // ========================================
 
   if (state.stage === "address") {
     if (text.length < 5) {
@@ -1850,9 +2257,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // CITY
-  // ========================================
 
   if (state.stage === "city") {
     if (text.length < 2 || text.length > 100) {
@@ -1869,9 +2274,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // STATE
-  // ========================================
 
   if (state.stage === "state") {
     if (text.length < 2 || text.length > 100) {
@@ -1892,9 +2295,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // POSTCODE AND ORDER SUBMISSION
-  // ========================================
 
   if (state.stage === "zipCode") {
     if (
@@ -1922,9 +2323,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // ORDER NUMBER
-  // ========================================
 
   if (state.stage === "order_number") {
     if (text.trim().length < 2) {
@@ -1945,9 +2344,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // ORDER TRACKING
-  // ========================================
 
   if (state.stage === "order_phone") {
     try {
@@ -2014,9 +2411,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // CUSTOMER SUPPORT
-  // ========================================
 
   if (state.stage === "support") {
     const aiResponse = await askCustomerAI(
@@ -2030,9 +2425,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
   // MAIN MENU SHORTCUTS
-  // ========================================
 
   if (
     ["1", "search", "search products", "find products"].includes(normalized)
@@ -2083,9 +2476,21 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
+  // DIRECT CATEGORY ROUTING
+
+  if (isCategoryBrowseRequest(text)) {
+    await showCategories(jid);
+    return;
+  }
+
+  // DIRECT CATALOGUE ROUTING
+
+  if (isCatalogBrowseRequest(text)) {
+    await showProducts(jid, "");
+    return;
+  }
+
   // DIRECT PRODUCT SEARCH ROUTING
-  // ========================================
 
   if (isExplicitProductRequest(text)) {
     const searchTerm = extractProductSearchTerm(text);
@@ -2095,42 +2500,28 @@ async function handleConversation(jid, text) {
       return;
     }
 
-    console.log("Explicit product search detected:", {
-      message: text,
-      searchTerm
-    });
+    console.log("Explicit product search:", searchTerm);
 
     await showProducts(jid, searchTerm);
     return;
   }
 
-  // ========================================
   // STANDALONE PRODUCT NAMES / BRANDS / SKU
-  // ========================================
 
   if (shouldTryCatalogSearch(text)) {
     const searchTerm = extractProductSearchTerm(text);
 
-    console.log("Possible product search:", {
-      message: text,
-      searchTerm
-    });
+    console.log("Possible product search:", searchTerm);
 
     await showProducts(jid, searchTerm);
     return;
   }
 
-  // ========================================
   // GROQ INTENT DETECTION
-  // ========================================
 
   const intent = await detectMessageIntent(text);
 
   console.log("Detected customer intent:", intent);
-
-  // ========================================
-  // GREETING / ACKNOWLEDGEMENT
-  // ========================================
 
   if (intent === "GREETING") {
     const aiResponse = await askCustomerAI(jid, text);
@@ -2139,27 +2530,15 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
-  // CATEGORY
-  // ========================================
-
   if (intent === "CATEGORY") {
     await showCategories(jid);
     return;
   }
 
-  // ========================================
-  // FULL CATALOGUE
-  // ========================================
-
   if (intent === "CATALOG") {
     await showProducts(jid, "");
     return;
   }
-
-  // ========================================
-  // PRODUCT SEARCH
-  // ========================================
 
   if (intent === "PRODUCT") {
     const searchTerm = extractProductSearchTerm(text);
@@ -2173,20 +2552,12 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
-  // ORDER TRACKING
-  // ========================================
-
   if (intent === "TRACKING") {
     conversations.set(jid, { stage: "order_number" });
 
     await sendText(jid, "Please enter your order number.");
     return;
   }
-
-  // ========================================
-  // SUPPORT
-  // ========================================
 
   if (intent === "SUPPORT") {
     conversations.set(jid, { stage: "support" });
@@ -2199,9 +2570,7 @@ async function handleConversation(jid, text) {
     return;
   }
 
-  // ========================================
-  // GENERAL QUESTIONS / TECHNICAL QUESTIONS
-  // ========================================
+  // GENERAL AND TECHNICAL QUESTIONS
 
   const aiResponse = await askCustomerAI(jid, text);
 
@@ -2339,9 +2708,22 @@ export async function startWhatsApp() {
   try {
     fs.mkdirSync(AUTH_FOLDER, { recursive: true });
 
+    // Load persistent customer welcome records.
+    loadWelcomedCustomers();
+
     console.log(
       "Using WhatsApp authentication folder:",
       AUTH_FOLDER
+    );
+
+    console.log(
+      "Founder welcome image:",
+      STORE_OWNER_IMAGE
+    );
+
+    console.log(
+      "Founder display name:",
+      STORE_OWNER_NAME
     );
 
     const { state, saveCreds } =
@@ -2524,6 +2906,20 @@ export async function startWhatsApp() {
               try {
                 if (!isConnected()) return;
 
+                // Send founder welcome only to first-time customers.
+                const firstWelcome =
+                  await sendFounderWelcome(jid);
+
+                // The welcome already answers a first-time greeting.
+                // Avoid sending a second unnecessary greeting.
+                if (
+                  firstWelcome &&
+                  isGreetingOrAcknowledgement(text)
+                ) {
+                  return;
+                }
+
+                // Continue normal customer request processing.
                 await handleConversation(jid, text);
 
               } catch (error) {
