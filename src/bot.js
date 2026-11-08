@@ -47,6 +47,21 @@ const STORE_TIMEZONE =
 const GROQ_MODEL =
   process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
+// Customer service contact details
+
+const CUSTOMER_SERVICE_PHONE = "07033533320";
+
+const CUSTOMER_SERVICE_WHATSAPP = "2347033533320";
+
+const CUSTOMER_SERVICE_WHATSAPP_LINK =
+  `https://wa.me/${CUSTOMER_SERVICE_WHATSAPP}`;
+
+const ONLINE_STORE_URL =
+  "https://shop.divinesolarhub.com";
+
+const OFFICIAL_WEBSITE_URL =
+  "https://www.solarhub.com";
+
 const MAX_AI_HISTORY = 8;
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_PDF_SIZE = 7 * 1024 * 1024;
@@ -160,8 +175,6 @@ function getStoreDateParts(date = new Date()) {
   return result;
 }
 
-// Get the current store time directly from JavaScript.
-
 function getTimeGreeting() {
   const { hour } = getStoreDateParts();
 
@@ -187,9 +200,6 @@ function getTimeGreeting() {
 
   return "Hello";
 }
-
-// Display the actual time the bot is using.
-// This helps diagnose hosting timezone problems.
 
 function logStoreClock() {
   try {
@@ -424,6 +434,114 @@ function getFounderWelcomeMessage() {
 }
 
 // ==========================================
+// CUSTOMER SERVICE AND HUMAN SUPPORT
+// ==========================================
+
+function isCustomerServiceRequest(message) {
+  const text = normalizeMessage(message);
+
+  const patterns = [
+    /\b(customer service|customer support|contact support)\b/,
+    /\bspeak to (a |an )?(human|person|agent|representative|staff|someone)\b/,
+    /\btalk to (a |an )?(human|person|agent|representative|staff|someone)\b/,
+    /\bi want to speak to someone\b/,
+    /\bi need to speak to someone\b/,
+    /\bi want a human agent\b/,
+    /\bconnect me to (a |an )?(human|person|agent|staff)\b/,
+    /\breal person\b/,
+    /\blive agent\b/,
+    /\bhuman assistance\b/,
+    /\bcontact your team\b/,
+    /\bcontact the company\b/,
+    /\bhow can i contact you\b/,
+    /\bhow do i contact you\b/,
+    /\bphone number\b/,
+    /\bwhatsapp number\b/,
+    /\bcomplaint\b/,
+    /\bi want to complain\b/,
+    /\bi have a problem\b/,
+    /\bi have an issue\b/,
+    /\bi need help from your team\b/,
+    /\bi need customer care\b/,
+    /\bcontact a representative\b/,
+    /\bspeak with your team\b/,
+    /\btalk with your team\b/,
+    /\bcontact a human\b/,
+    /\bcontact a person\b/
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
+}
+
+function isOrderPaymentProblem(message) {
+  const text = normalizeMessage(message);
+
+  const patterns = [
+    /\bpayment failed\b/,
+    /\bpayment problem\b/,
+    /\bpayment issue\b/,
+    /\bpayment error\b/,
+    /\bpayment not successful\b/,
+    /\bpayment unsuccessful\b/,
+    /\bunable to pay\b/,
+    /\bcannot make payment\b/,
+    /\bpaid but\b/,
+    /\bi have paid\b/,
+    /\bpayment deducted\b/,
+    /\bmoney deducted\b/,
+    /\bdebit(ed)? but\b/,
+    /\brefund\b/,
+    /\bwrong payment\b/,
+    /\bdouble payment\b/,
+    /\bcharged twice\b/,
+    /\border problem\b/,
+    /\border issue\b/,
+    /\border not received\b/,
+    /\bwhere is my order\b/,
+    /\bdelayed delivery\b/,
+    /\blate delivery\b/,
+    /\bmissing item\b/,
+    /\bdamaged product\b/,
+    /\bwrong product delivered\b/,
+    /\bcancel my order\b/,
+    /\bchange my order\b/
+  ];
+
+  return patterns.some(pattern => pattern.test(text));
+}
+
+function getCustomerServiceMessage(intro = "") {
+  let message = "";
+
+  if (intro) {
+    message += `${intro}\n\n`;
+  }
+
+  message +=
+    `*${STORE_NAME} - CUSTOMER SERVICE* ☀️\n\n` +
+    `Our customer service team is available to assist you.\n\n` +
+    `📞 *Phone / WhatsApp:*\n` +
+    `${CUSTOMER_SERVICE_PHONE}\n\n` +
+    `💬 *Chat directly with our team:*\n` +
+    `${CUSTOMER_SERVICE_WHATSAPP_LINK}\n\n` +
+    `🛒 *Online Store:*\n` +
+    `${ONLINE_STORE_URL}\n\n` +
+    `🌐 *Website:*\n` +
+    `${OFFICIAL_WEBSITE_URL}\n\n` +
+    `If your enquiry concerns an order, payment, refund, delivery or product complaint, please contact our team directly and provide your order number where applicable.\n\n` +
+    `Thank you for choosing ${STORE_NAME}. 😊`;
+
+  return message;
+}
+
+async function sendCustomerServiceDetails(jid, intro = "") {
+  await sendText(
+    jid,
+    getCustomerServiceMessage(intro)
+  );
+}
+
+// ==========================================
 // GROQ AI
 // ==========================================
 
@@ -588,6 +706,41 @@ the payment system confirms it.
 Never claim an order was created without API confirmation.
 
 Never invent delivery fees or delivery dates.
+
+8. CUSTOMER SERVICE ESCALATION
+
+Official customer service contact details:
+
+Phone/WhatsApp: ${CUSTOMER_SERVICE_PHONE}
+
+WhatsApp chat:
+${CUSTOMER_SERVICE_WHATSAPP_LINK}
+
+Online store:
+${ONLINE_STORE_URL}
+
+Website:
+${OFFICIAL_WEBSITE_URL}
+
+If a customer requests a human agent, customer care,
+a representative, or a member of the store team,
+direct them to the official customer service contact.
+
+If a customer reports payment failure, money deducted
+without order confirmation, refund requests, delivery
+problems, damaged products, missing items, order
+cancellation or other complaints, recommend contacting
+the customer service team directly.
+
+Do not claim that you have transferred the customer
+to a human agent.
+
+Do not claim that a human agent has joined the chat.
+
+Do not invent customer service opening hours.
+
+The application will provide official contact details
+automatically when escalation is required.
 
 WHATSAPP STYLE:
 Use short paragraphs, clear explanations and natural
@@ -814,6 +967,8 @@ function shouldTryCatalogSearch(message) {
   if (isCatalogBrowseRequest(text)) return false;
   if (isGreetingOrAcknowledgement(text)) return false;
   if (isTechnicalQuestion(text)) return false;
+  if (isCustomerServiceRequest(text)) return false;
+  if (isOrderPaymentProblem(text)) return false;
 
   const words = text.split(/\s+/).filter(Boolean);
 
@@ -866,6 +1021,14 @@ function extractProductSearchTerm(message = "") {
 function fallbackIntent(message) {
   const text = normalizeMessage(message);
 
+  if (isCustomerServiceRequest(text)) {
+    return "SUPPORT";
+  }
+
+  if (isOrderPaymentProblem(text)) {
+    return "SUPPORT";
+  }
+
   if (isCategoryBrowseRequest(text)) return "CATEGORY";
   if (isStoreInventoryQuestion(text)) return "CATEGORY";
   if (isCatalogBrowseRequest(text)) return "CATALOG";
@@ -878,12 +1041,6 @@ function fallbackIntent(message) {
     /\b(track|tracking|order status|where is my order|my order|check my order)\b/i.test(text)
   ) {
     return "TRACKING";
-  }
-
-  if (
-    /\b(customer support|speak to someone|human agent|representative|complaint|talk to a person)\b/i.test(text)
-  ) {
-    return "SUPPORT";
   }
 
   if (isExplicitProductRequest(text)) {
@@ -959,7 +1116,21 @@ TRACKING:
 The customer wants to track an existing order.
 
 SUPPORT:
-The customer wants human assistance.
+The customer needs customer service, a human agent,
+help with an order, payment, refund, delivery,
+complaint or other issue requiring store assistance.
+
+Examples:
+"I want to speak to a human."
+"Connect me to customer care."
+"I have a payment problem."
+"I paid but my order was not confirmed."
+"My money was deducted."
+"I want a refund."
+"My order has not arrived."
+"I received a damaged product."
+"I want to make a complaint."
+"Give me your WhatsApp number."
 
 GREETING:
 Greetings and simple acknowledgements.
@@ -2075,6 +2246,31 @@ async function handleConversation(jid, text) {
     return;
   }
 
+  // ========================================
+  // AUTOMATIC CUSTOMER SERVICE ESCALATION
+  // ========================================
+
+  if (
+    isCustomerServiceRequest(text) ||
+    isOrderPaymentProblem(text)
+  ) {
+    console.log(
+      "Customer service escalation requested:",
+      text
+    );
+
+    conversations.delete(jid);
+
+    await sendCustomerServiceDetails(
+      jid,
+      isOrderPaymentProblem(text)
+        ? "I'm sorry you're experiencing this problem. Our customer service team can help you resolve it."
+        : "Certainly! You can contact our customer service team directly using the details below."
+    );
+
+    return;
+  }
+
   // DATABASE-FIRST STORE INVENTORY ROUTING
 
   if (
@@ -2549,10 +2745,18 @@ async function handleConversation(jid, text) {
   if (state.stage === "support") {
     const aiResponse = await askCustomerAI(
       jid,
-      `The customer needs support. Their message is: ${text}`
+      `The customer needs assistance. Their message is: ${text}
+
+Help them if possible. Do not claim to have connected
+them to a human agent.`
     );
 
-    await sendText(jid, aiResponse);
+    await sendText(
+      jid,
+      `${aiResponse}\n\n${getCustomerServiceMessage(
+        "For further assistance, you can also contact our customer service team directly:"
+      )}`
+    );
 
     conversations.delete(jid);
     return;
@@ -2601,9 +2805,9 @@ async function handleConversation(jid, text) {
   ) {
     conversations.set(jid, { stage: "support" });
 
-    await sendText(
+    await sendCustomerServiceDetails(
       jid,
-      "Please describe what you need. Our assistant will help you."
+      "You've selected customer support. Please describe your issue, or contact our customer service team directly using the details below."
     );
 
     return;
@@ -2679,11 +2883,11 @@ async function handleConversation(jid, text) {
   }
 
   if (intent === "SUPPORT") {
-    conversations.set(jid, { stage: "support" });
+    conversations.delete(jid);
 
-    await sendText(
+    await sendCustomerServiceDetails(
       jid,
-      "Please describe what you need. Our customer service assistant will help you."
+      "I'll be happy to help you reach our customer service team."
     );
 
     return;
@@ -2829,7 +3033,6 @@ export async function startWhatsApp() {
 
     loadWelcomedCustomers();
 
-    // Show the correct Nigerian time when the bot starts.
     logStoreClock();
 
     console.log(
@@ -2930,7 +3133,6 @@ export async function startWhatsApp() {
             `${STORE_NAME} WhatsApp connected successfully.`
           );
 
-          // Log the time again after successful connection.
           logStoreClock();
         }
 
